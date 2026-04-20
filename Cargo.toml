@@ -1,0 +1,25 @@
+[package]
+name = "xct-win8bridge-helper"
+version = "0.1.0"
+edition = "2021"
+description = "Desktop helper for xct-win8bridge: obtains an MSA RPS ticket for user.auth.xboxlive.com via the OS's OnlineIdAuthenticator."
+license = "MIT"
+
+[[bin]]
+name = "xal_probe"
+path = "src/bin/xal_probe.rs"
+
+[[bin]]
+name = "ticket_server"
+path = "src/bin/ticket_server.rs"
+
+[dependencies]
+windows = { version = "0.61", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Security_Authentication_OnlineId",
+    "Security_Authentication_Web_Core",
+    "Security_Credentials",
+    "Win32_Foundation",
+] }
+windows-future = { version = "0.2", features = ["std"] }
