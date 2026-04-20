@@ -16,6 +16,14 @@ This project is a **working proof that those titles can be bridged to the modern
 | Microsoft Mahjong (1.9.0.40714) | 1297290225 | ✓ | ✓ | ✓ |
 | Microsoft Minesweeper (2.9.1913.0) | 1297290226 | ✓ | ✓ | ✓ |
 
+Microsoft Mahjong with gamertag, gamerpic and its legacy XBL2-era achievement set all populating through the bridge:
+
+![Microsoft Mahjong — signed in, avatar loaded, legacy achievements rendered](docs/mahjong-achievements.png)
+
+Microsoft Minesweeper likewise — same bridge, no title-specific code:
+
+![Microsoft Minesweeper — signed in, avatar loaded, legacy achievements rendered](docs/minesweeper-achievements.png)
+
 Daily Challenge loaders in Mahjong are blocked by a separate, unrelated problem — the Arkadium backend that hosts the challenge content is itself decommissioned. That's out of scope here and lives under a different umbrella.
 
 ## Why this is Microsoft-friendly
