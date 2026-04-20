@@ -41,7 +41,7 @@ Under the hood this is `FindAccountProviderWithAuthorityAsync("https://login.mic
 
 [wam]: https://learn.microsoft.com/en-us/windows/uwp/security/web-account-manager
 
-### 2. `mahjong_bridge.py` — a [mitmproxy][mitmproxy] addon
+### 2. `xbl_bridge.py` — a [mitmproxy][mitmproxy] addon
 
 On startup:
 
@@ -69,7 +69,7 @@ On each game request to `*.xboxlive.com`:
        ticket_server (Rust)
                 │  GET /ticket
                 ▼
-       mahjong_bridge.py (mitmproxy addon)
+       xbl_bridge.py (mitmproxy addon)
                 │
    user.auth.xboxlive.com   ← MBI
    device.auth.xboxlive.com ← (not needed; simple flow)
@@ -126,7 +126,7 @@ In three terminals / sessions:
 target\release\ticket_server.exe
 
 # 2. mitmproxy with the bridge addon
-mitmweb -s addon\mahjong_bridge.py
+mitmweb -s addon\xbl_bridge.py
 
 # 3. Enable the system proxy so the game routes through mitmproxy
 powershell -Command "Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -Name ProxyServer -Value '127.0.0.1:8080'; Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -Name ProxyEnable -Value 1"
@@ -157,26 +157,7 @@ netsh winhttp reset proxy
 
 ## Scope
 
-**In scope.** UWP titles shipped with the legacy `Microsoft.Xbox.dll` + `xbl.spa` XBL2.0 SDK that authenticate via `auth.xboxlive.com/XSts/xsts.svc/IWSTrust13`. Detect these by checking the package install dir — if both files are present, this bridge should cover it.
-
-**Out of scope.** Modern `Microsoft.Xbox.Services.dll` / XSAPI rewrites. The Windows 10 Solitaire Collection is an example: it shares its TitleId with its legacy predecessor but its binary was rewritten against the modern XSAPI, so it never makes the XBL2.0 calls this bridge rewrites. It's not *broken* — it's simply not in the class of problems this project addresses. If you want to play the Win8 era Solitaire Collection, obtain that specific build.
-
-**Separately scoped.** Games whose Store entitlement was revoked (delisted from Store). That's a license-infrastructure problem, not an auth problem. See e.g. [xct-pinball-patcher] for that class of fix — different project, different tooling.
-
-[xct-pinball-patcher]: https://github.com/freshdex/xct-pinball-patcher
-
-## Progress board
-
-- [x] Microsoft Mahjong
-- [x] Microsoft Minesweeper
-- [ ] Microsoft Jigsaw (the legacy Windows 8 version, not the modern rewrite)
-- [ ] Microsoft Taptiles
-- [ ] Microsoft Wordament
-- [ ] Microsoft Sudoku (legacy)
-- [ ] Crossroad 2 / Crash Course 2
-- [ ] Any other Windows 8 first-party title that shipped with `Microsoft.Xbox.dll` + `xbl.spa`
-
-Pull requests for additional titles welcome — most will just need a loopback exemption, zero code changes. Titles whose title-group storage path differs from the default pattern may need a line in the `titlestorage` shim.
+UWP titles shipped with the legacy `Microsoft.Xbox.dll` + `xbl.spa` XBL2.0 SDK that authenticate via `auth.xboxlive.com/XSts/xsts.svc/IWSTrust13`. Detect these by checking the package install dir — if both files are present, this bridge should cover it.
 
 ## Forking notes
 

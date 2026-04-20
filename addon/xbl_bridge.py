@@ -1,4 +1,4 @@
-"""mitmproxy addon: bridge legacy XBL2.0 Mahjong auth to modern XBL3.0.
+"""mitmproxy addon: bridge legacy XBL2.0 UWP game auth to modern XBL3.0.
 
 Chain on startup (all public documented XBL endpoints):
 
@@ -21,12 +21,13 @@ Per-request policy:
   * `stats.xboxlive.com`, `communications.xboxlive.com` — these endpoints
     only speak XBL2.0 (server returns `methods=Xbl20`). No modern bridge
     exists server-side. Pass through untouched.
-  * `auth.xboxlive.com/XSts/...` — Mahjong's legacy mint call. Leave it;
-    the 200 response keeps Mahjong's internal state machine moving.
+  * `auth.xboxlive.com/XSts/...` — the legacy XBL2 mint call the game
+    makes itself. Leave it; the 200 response keeps the game's internal
+    sign-in state machine moving.
   * Everything else in `*.xboxlive.com` with an `Authorization: XBL2.0`
     gets rewritten to XBL3.0 + Signature.
 
-Run:  mitmdump -s addon/mahjong_bridge.py  (with ticket_server.exe up)
+Run:  mitmdump -s addon/xbl_bridge.py  (with ticket_server.exe up)
 """
 
 from __future__ import annotations
@@ -94,20 +95,34 @@ SAFE_PROFILE_SETTINGS = {
     "Gamertag",
 }
 
-# Title-group-scoped storage paths for Achievements state, Daily/Month
-# Challenge tracking, and cross-game shared settings blobs. Both the user-
-# scoped (/users/xuid(...)/storage/...) and the public (/media/...) variants
-# return 403 on modern XBL because our XSTS has no title claim (TitleId=0
-# in the token). The only ways to mint a title-bound XSTS all require the
-# title's private signing key, which Microsoft owns. Without server-side
-# help, we ship a compatibility shim — emulates the XBL2-era contract
-# where a missing record returned 200 with empty body.
+# Per-title-group allowlist for the titlestorage 403 shim.  Only games we
+# know benefit from having a 403 -> 200(empty) smoothing belong here.
+# Generalising the shim to ANY titlegroup was tried and caused a regression
+# in Microsoft Minesweeper: its `SyncedData.json` path *needs* to 403 so
+# the game falls back to progress.xboxlive.com/achievements (which works).
+# Shimming it broke that fallback and the Awards page then showed
+# "Sign in to Xbox to view and earn Achievements".
+#
+# Add new titlegroups here if you discover a game's storage path
+# benefits from the shim. Keep it conservative.
+_SHIM_TITLEGROUPS = {
+    "af51caa0-ea8b-46e3-87be-ec824e127a41",  # Microsoft Mahjong
+}
 _TITLESTORAGE_USER_RE = re.compile(
-    r"^/users/xuid\(\d+\)/storage/titlestorage/titlegroups/[0-9a-fA-F-]+/"
+    r"^/users/xuid\(\d+\)/storage/titlestorage/titlegroups/([0-9a-fA-F-]+)/"
 )
 _TITLESTORAGE_MEDIA_RE = re.compile(
-    r"^/media/titlegroups/[0-9a-fA-F-]+/storage/"
+    r"^/media/titlegroups/([0-9a-fA-F-]+)/storage/"
 )
+
+
+def _titlestorage_should_shim(path: str) -> bool:
+    """True only if the titlestorage path's titlegroup is one we've
+    whitelisted as benefiting from a 403 -> empty-200 shim."""
+    m = _TITLESTORAGE_USER_RE.match(path) or _TITLESTORAGE_MEDIA_RE.match(path)
+    if not m:
+        return False
+    return m.group(1).lower() in _SHIM_TITLEGROUPS
 
 SSL_CTX = ssl.create_default_context()
 
@@ -253,7 +268,7 @@ def _mint_xsts(user_token: str, relying_party: str = XBOXLIVE_RP,
 
 # --- addon ------------------------------------------------------------------
 
-class MahjongBridge:
+class XblBridge:
     def __init__(self) -> None:
         self.signer: RequestSigner | None = None
         self.xbl3_auth: str | None = None
@@ -269,16 +284,16 @@ class MahjongBridge:
         try:
             self._bootstrap()
         except Exception as exc:
-            ctx.log.error(f"[mahjong_bridge] bootstrap FAILED: {exc}")
+            ctx.log.error(f"[xbl_bridge] bootstrap FAILED: {exc}")
 
     def _bootstrap(self) -> None:
-        ctx.log.info("[mahjong_bridge] MBI ticket from ticket_server...")
+        ctx.log.info("[xbl_bridge] MBI ticket from ticket_server...")
         mbi, account = _fetch_mbi_ticket()
         self.account = account
-        ctx.log.info(f"[mahjong_bridge]   account={account} mbi_len={len(mbi)}")
+        ctx.log.info(f"[xbl_bridge]   account={account} mbi_len={len(mbi)}")
 
         user_token = _exchange_mbi_for_user_token(mbi)
-        ctx.log.info(f"[mahjong_bridge] UserToken ({len(user_token)} bytes)")
+        ctx.log.info(f"[xbl_bridge] UserToken ({len(user_token)} bytes)")
 
         # Mint a simple (UserTokens-only) XSTS. Empirically this works for
         # every endpoint Mahjong actually consumes successfully — profile,
@@ -297,7 +312,7 @@ class MahjongBridge:
         xsts_token = xsts["Token"]
         self.xbl3_auth = f"XBL3.0 x={self.uhs};{xsts_token}"
         ctx.log.info(
-            f"[mahjong_bridge] READY — gamertag={self.gamertag} xuid={self.xuid} "
+            f"[xbl_bridge] READY — gamertag={self.gamertag} xuid={self.xuid} "
             f"simple XSTS token_len={len(xsts_token)}"
         )
 
@@ -333,7 +348,7 @@ class MahjongBridge:
 
         self.rewrote += 1
         ctx.log.info(
-            f"[mahjong_bridge] bridged {flow.request.method} "
+            f"[xbl_bridge] bridged {flow.request.method} "
             f"{host}{flow.request.path[:100]}"
         )
 
@@ -367,17 +382,17 @@ class MahjongBridge:
                 dropped_restricted.append(name)
         if unknown:
             ctx.log.warn(
-                f"[mahjong_bridge] profile-settings shim: unmapped legacy "
+                f"[xbl_bridge] profile-settings shim: unmapped legacy "
                 f"setting IDs {unknown}"
             )
         if dropped_restricted:
             ctx.log.info(
-                f"[mahjong_bridge] profile-settings shim: dropped restricted "
+                f"[xbl_bridge] profile-settings shim: dropped restricted "
                 f"{dropped_restricted}"
             )
         new = {"userIds": user_ids, "settings": settings}
         ctx.log.info(
-            f"[mahjong_bridge] profile-settings shim: {len(setting_ids)} "
+            f"[xbl_bridge] profile-settings shim: {len(setting_ids)} "
             f"legacy ids -> {len(settings)} modern names"
         )
         return json.dumps(new).encode("utf-8")
@@ -389,25 +404,19 @@ class MahjongBridge:
         if not host.endswith(".xboxlive.com"):
             return
 
-        # titlestorage 403 shim — covers per-user title-group storage
-        # (Achievements, Daily Challenge) and public title-group media
-        # (cross-game shared settings blobs). Works across any legacy
-        # title, not just Mahjong — regex-matched, not hard-coded GUID.
+        # titlestorage 403 shim, whitelisted per-titlegroup.
         if (
             host == "titlestorage.xboxlive.com"
             and flow.response
             and flow.response.status_code == 403
-            and (
-                _TITLESTORAGE_USER_RE.match(flow.request.path)
-                or _TITLESTORAGE_MEDIA_RE.match(flow.request.path)
-            )
+            and _titlestorage_should_shim(flow.request.path)
         ):
             self._shim_titlestorage(flow)
             return
 
         if flow.response and flow.response.status_code in (401, 403):
             ctx.log.warn(
-                f"[mahjong_bridge] {flow.response.status_code} on {flow.request.method} "
+                f"[xbl_bridge] {flow.response.status_code} on {flow.request.method} "
                 f"{host}{flow.request.path[:120]}  "
                 f"wwwauth={flow.response.headers.get('WWW-Authenticate', '')[:80]!r}"
             )
@@ -423,7 +432,7 @@ class MahjongBridge:
             flow.response.headers["Content-Type"] = "application/json"
             flow.response.set_content(b"{}")
             ctx.log.info(
-                f"[mahjong_bridge] titlestorage shim: GET 403->200(empty) "
+                f"[xbl_bridge] titlestorage shim: GET 403->200(empty) "
                 f"{flow.request.path[:100]}"
             )
         elif method in ("PUT", "POST"):
@@ -431,14 +440,14 @@ class MahjongBridge:
             flow.response.headers["Content-Type"] = "application/json"
             flow.response.set_content(b"{}")
             ctx.log.info(
-                f"[mahjong_bridge] titlestorage shim: {method} 403->200 "
+                f"[xbl_bridge] titlestorage shim: {method} 403->200 "
                 f"{flow.request.path[:100]}"
             )
         elif method == "DELETE":
             flow.response.status_code = 204
             flow.response.set_content(b"")
             ctx.log.info(
-                f"[mahjong_bridge] titlestorage shim: DELETE 403->204 "
+                f"[xbl_bridge] titlestorage shim: DELETE 403->204 "
                 f"{flow.request.path[:100]}"
             )
 
@@ -464,9 +473,9 @@ class MahjongBridge:
         new_body = json.dumps(payload).encode("utf-8")
         flow.response.set_content(new_body)
         ctx.log.info(
-            f"[mahjong_bridge] profile-settings response shim: translated "
+            f"[xbl_bridge] profile-settings response shim: translated "
             f"{translated} setting keys back to numeric"
         )
 
 
-addons = [MahjongBridge()]
+addons = [XblBridge()]
