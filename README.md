@@ -176,7 +176,7 @@ UWP titles shipped with the legacy `Microsoft.Xbox.dll` + `xbl.spa` XBL2.0 SDK t
 
 ## Acknowledgements
 
-Built on the work and patience of the Xbox preservation community, particularly the [xbox-collection-tracker](https://github.com/freshdex/xbox-collection-tracker) project whose proven XBL auth primitives informed the initial exploration here.
+Built on the work and patience of the Xbox preservation community, particularly the xbox-collection-tracker project whose proven XBL auth primitives informed the initial exploration here.
 
 ---
 
