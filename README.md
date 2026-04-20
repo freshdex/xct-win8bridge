@@ -98,7 +98,7 @@ On each game request to `*.xboxlive.com`:
   cargo build --release --bin ticket_server
   ```
 
-- An Azure AD / Entra app registration ("Personal Microsoft accounts only", public client flows enabled). See [Setup](#setup).
+- An Azure AD / Entra app registration to identify the caller of `WebAuthenticationCoreManager`.  **You don't have to register your own** — this repo ships with a working client ID in `src/bin/ticket_server.rs` that you're welcome to reuse. It's a public client ID (no secret), scoped to "Personal Microsoft accounts only", and does nothing beyond requesting Xbox Live user tickets for whoever consents to it. If you'd rather own the identity, see [Registering your own app](#registering-your-own-app-optional) below.
 
 - The mitmproxy CA certificate trusted in the Windows Local Machine certificate store so `*.xboxlive.com` TLS can be intercepted. mitmproxy prints the command once when you first run it.
 
@@ -110,16 +110,6 @@ On each game request to `*.xboxlive.com`:
   ```
 
 ## Setup
-
-### Register an Azure AD / Entra app (one-time)
-
-1. Open [portal.azure.com](https://portal.azure.com) → **App registrations** → **New registration**.
-2. Name: whatever (e.g. `xct-win8bridge`).
-3. **Supported account types: "Personal Microsoft accounts only"**. This is important — Xbox Live runs on consumer MSAs.
-4. No redirect URI needed (the WAM broker path doesn't use OAuth web redirects).
-5. Register, then copy the **Application (client) ID** GUID.
-6. Under **Authentication → Advanced settings**, set **Allow public client flows** to Yes.
-7. Paste your client ID into `src/bin/ticket_server.rs` (`CLIENT_ID`) and `src/bin/xal_probe.rs`.
 
 ### Build
 
@@ -145,6 +135,18 @@ netsh winhttp set proxy proxy-server="127.0.0.1:8080" bypass-list="<-loopback>"
 ```
 
 Launch Mahjong or Minesweeper from the Start menu. Sign-in should resolve, the gamerpic should appear in the top-right, and the Awards page should populate with your legacy achievement set.
+
+### Registering your own app (optional)
+
+The bundled client ID is good enough to run this project; Microsoft issues you a personal MSA-scoped ticket when *your* account consents to *any* app requesting that scope. But if you'd rather own the identity yourself:
+
+1. Open [portal.azure.com](https://portal.azure.com) → **App registrations** → **New registration**.
+2. Name: whatever (e.g. `xct-win8bridge-<yourname>`).
+3. **Supported account types: "Personal Microsoft accounts only"** — Xbox Live runs on consumer MSAs.
+4. No redirect URI needed (the WAM broker path doesn't use OAuth web redirects).
+5. Register, then copy the **Application (client) ID** GUID.
+6. Under **Authentication → Advanced settings**, set **Allow public client flows** to Yes.
+7. Replace `CLIENT_ID` in `src/bin/ticket_server.rs` and `src/bin/xal_probe.rs` with your GUID.
 
 ### Tear-down
 
@@ -178,7 +180,7 @@ Pull requests for additional titles welcome — most will just need a loopback e
 
 ## Forking notes
 
-- **Register your own Azure AD app.** Do not reuse anyone else's client ID. The bridge is designed so that the user's own Microsoft account and the user's own registered app identity are the only credentials in play.
+- **Reuse the bundled client ID freely**, or register your own — either works. The bundled one is a public client ID with no secret and no special privileges; each user's own Microsoft account is always what actually authenticates.
 - **The MSA ticket never leaves the local machine.** `ticket_server` binds to `127.0.0.1` only. The XBL3.0 mint chain after that goes direct to `*.xboxlive.com`.
 - **No retention.** This is not a token-caching layer. Every session re-mints.
 - **Be a good neighbour.** The bridge exists to demonstrate the transformation, not to hammer XBL. Don't script it to mass-request.
