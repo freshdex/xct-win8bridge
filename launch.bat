@@ -80,9 +80,11 @@ if errorlevel 1 (
 
 rem --- loopback exemptions ---------------------------------------------------
 echo [5/7] Granting loopback access to supported games...
-CheckNetIsolation LoopbackExempt -a -n="Microsoft.MicrosoftMahjong_8wekyb3d8bbwe"     >nul 2>&1
-CheckNetIsolation LoopbackExempt -a -n="Microsoft.MicrosoftMinesweeper_8wekyb3d8bbwe" >nul 2>&1
-echo       Mahjong, Minesweeper exempted.
+CheckNetIsolation LoopbackExempt -a -n="Microsoft.MicrosoftMahjong_8wekyb3d8bbwe"             >nul 2>&1
+CheckNetIsolation LoopbackExempt -a -n="Microsoft.MicrosoftMinesweeper_8wekyb3d8bbwe"         >nul 2>&1
+CheckNetIsolation LoopbackExempt -a -n="Microsoft.MicrosoftSolitaireCollection_8wekyb3d8bbwe" >nul 2>&1
+CheckNetIsolation LoopbackExempt -a -n="Microsoft.Adera_8wekyb3d8bbwe"                        >nul 2>&1
+echo       Mahjong, Minesweeper, Solitaire Collection, Adera exempted.
 
 rem --- start helpers ---------------------------------------------------------
 echo [6/7] Launching ticket_server and mitmdump in new windows...

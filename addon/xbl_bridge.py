@@ -33,6 +33,7 @@ Run:  mitmdump -s addon/xbl_bridge.py  (with ticket_server.exe up)
 from __future__ import annotations
 
 import base64
+import datetime
 import hashlib
 import json
 import os
@@ -48,6 +49,72 @@ import uuid
 import ecdsa
 from mitmproxy import ctx, http
 
+
+def _forge_xsts_rstr(xsts_token: str, message_id: str) -> bytes:
+    """Forge a WS-Trust 1.3 RequestSecurityTokenResponse envelope for
+    Adera / Pinball-style legacy Microsoft.Xbox.dll XSts calls.
+
+    The server's real XSts endpoint rejects WLID1.0 bootstrap credentials
+    on post-deprecation accounts with `x-err: 0x8015DA87`. We substitute
+    a synthetic success response carrying the bridge's already-minted
+    modern XBL JWT (same one we use to rewrite XBL2.0 → XBL3.0 headers).
+    The bearer JWT is the format these clients ask for via
+    `http://oauth.net/grant_type/xjwt/1.0/bearer`.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    expires = now + datetime.timedelta(hours=16)
+    iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    iso_exp = expires.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # WS-Security base64 encoding for BinarySecurityToken
+    b64 = base64.b64encode(xsts_token.encode("ascii")).decode("ascii")
+    envelope = (
+        '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"'
+        ' xmlns:a="http://www.w3.org/2005/08/addressing">'
+        '<s:Header>'
+        '<a:Action s:mustUnderstand="1">'
+        'http://docs.oasis-open.org/ws-sx/ws-trust/200512/RSTRC/IssueFinal'
+        '</a:Action>'
+        f'<a:RelatesTo>{message_id}</a:RelatesTo>'
+        '</s:Header>'
+        '<s:Body>'
+        '<trust:RequestSecurityTokenResponseCollection'
+        ' xmlns:trust="http://docs.oasis-open.org/ws-sx/ws-trust/200512">'
+        '<trust:RequestSecurityTokenResponse>'
+        '<trust:Lifetime>'
+        '<wsu:Created xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/'
+        f'oasis-200401-wss-wssecurity-utility-1.0.xsd">{iso}</wsu:Created>'
+        '<wsu:Expires xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/'
+        f'oasis-200401-wss-wssecurity-utility-1.0.xsd">{iso_exp}</wsu:Expires>'
+        '</trust:Lifetime>'
+        '<wsp:AppliesTo xmlns:wsp="http://schemas.xmlsoap.org/ws/2004/09/policy">'
+        '<EndpointReference xmlns="http://www.w3.org/2005/08/addressing">'
+        '<Address>http://xboxlive.com</Address>'
+        '</EndpointReference>'
+        '</wsp:AppliesTo>'
+        '<trust:RequestedSecurityToken>'
+        '<trust:BinarySecurityToken'
+        ' ValueType="http://oauth.net/grant_type/xjwt/1.0/bearer"'
+        ' EncodingType="http://docs.oasis-open.org/wss/2004/01/'
+        'oasis-200401-wss-soap-message-security-1.0#Base64Binary">'
+        f'{b64}'
+        '</trust:BinarySecurityToken>'
+        '</trust:RequestedSecurityToken>'
+        '<trust:TokenType>'
+        'http://oauth.net/grant_type/xjwt/1.0/bearer'
+        '</trust:TokenType>'
+        '<trust:RequestType>'
+        'http://docs.oasis-open.org/ws-sx/ws-trust/200512/Issue'
+        '</trust:RequestType>'
+        '<trust:KeyType>'
+        'http://docs.oasis-open.org/ws-sx/ws-trust/200512/Bearer'
+        '</trust:KeyType>'
+        '</trust:RequestSecurityTokenResponse>'
+        '</trust:RequestSecurityTokenResponseCollection>'
+        '</s:Body>'
+        '</s:Envelope>'
+    )
+    return envelope.encode("utf-8")
+
 # --- configuration ----------------------------------------------------------
 
 TICKET_SERVER_URL = "http://127.0.0.1:8099/ticket"
@@ -62,6 +129,19 @@ XBOXLIVE_RP = "http://xboxlive.com"
 XBL20_ONLY_HOSTS = {
     "stats.xboxlive.com",
     "communications.xboxlive.com",
+}
+
+# Hosts that are *dead* server-side — DNS still resolves but the IP no
+# longer accepts connections. The legacy-SDK games block their sign-in
+# state machine until they get a response from these endpoints, so we
+# synthesize a 200-empty reply locally to keep the flow moving.
+#
+#   data.xboxlive.com — legacy XBL presence/beacon endpoint that Microsoft
+#                       Adera (and likely others) posts to during sign-in.
+#                       Decommissioned circa Xbox 360 retirement; now
+#                       times out at the TCP layer.
+DEAD_HOSTS_SHIM_200 = {
+    "data.xboxlive.com",
 }
 
 # Mapping of legacy XBL2.0 numeric setting IDs to their modern string names
@@ -107,6 +187,7 @@ SAFE_PROFILE_SETTINGS = {
 # benefits from the shim. Keep it conservative.
 _SHIM_TITLEGROUPS = {
     "af51caa0-ea8b-46e3-87be-ec824e127a41",  # Microsoft Mahjong
+    "b3288d02-ddca-4e7c-955a-06142d6e138e",  # Microsoft Solitaire Collection
 }
 _TITLESTORAGE_USER_RE = re.compile(
     r"^/users/xuid\(\d+\)/storage/titlestorage/titlegroups/([0-9a-fA-F-]+)/"
@@ -323,8 +404,48 @@ class XblBridge:
         if not host.endswith(".xboxlive.com"):
             return
 
-        # Legacy mint call passes through untouched.
-        if host == "auth.xboxlive.com" and flow.request.path.startswith("/XSts"):
+        # Dead hosts: short-circuit with a synthetic 200 empty body so the
+        # game's state machine unblocks. Setting flow.response here prevents
+        # mitmproxy from ever trying to reach the (unreachable) upstream.
+        if host in DEAD_HOSTS_SHIM_200:
+            flow.response = http.Response.make(
+                200, b"", {"Content-Type": "application/json"}
+            )
+            ctx.log.info(
+                f"[xbl_bridge] dead-host shim: {flow.request.method} "
+                f"{host}{flow.request.path[:100]} -> 200(empty)"
+            )
+            return
+
+        # Legacy XSts mint call (auth.xboxlive.com/XSts/xsts.svc/IWSTrust13).
+        # Post-deprecation of Xbox Live 1.0, the server rejects the WLID1.0
+        # bootstrap tokens that Microsoft.Xbox.dll sends with
+        # `x-err: 0x8015DA87` and a bare WCF dispatcher fault — Adera /
+        # Pinball / Taptiles never progress past this.
+        #
+        # Forge a success response carrying the bridge's already-minted
+        # modern XBL3.0 XSTS JWT. Clients that consume the bearer JWT
+        # without verifying the SOAP envelope signature (we've seen Adera
+        # do this) proceed into the profile / achievements fetch paths,
+        # which the rest of this addon already bridges.
+        if host in ("auth.xboxlive.com", "activeauth.xboxlive.com") and \
+                flow.request.path.startswith("/XSts"):
+            req_body = flow.request.get_content() or b""
+            msg_id_match = re.search(rb"<a:MessageID>([^<]+)</a:MessageID>", req_body)
+            msg_id = msg_id_match.group(1).decode("ascii", "replace") if msg_id_match else ""
+            # Extract the raw JWT from "XBL3.0 x=<uhs>;<jwt>"
+            jwt = self.xbl3_auth.split(";", 1)[1] if self.xbl3_auth and ";" in self.xbl3_auth else ""
+            if not jwt:
+                return  # bridge not bootstrapped; let the real server reject
+            forged = _forge_xsts_rstr(jwt, msg_id)
+            flow.response = http.Response.make(
+                200, forged,
+                {"Content-Type": "application/soap+xml; charset=utf-8"},
+            )
+            ctx.log.info(
+                "[xbl_bridge] forged XSts success for "
+                f"{host}{flow.request.path[:80]}  msg_id={msg_id[:40]}"
+            )
             return
 
         # Hosts that only speak XBL2.0 server-side: pass through. Our rewrite

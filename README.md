@@ -6,15 +6,42 @@ Microsoft quietly deprecated the old `XBL2.0`-formatted XSTS tokens used by the 
 
 This project is a **working proof that those titles can be bridged to the modern `XBL3.0` token format entirely via public, documented APIs** — no reverse-engineered private endpoints, no spoofed client IDs, no process injection, no binary patching. The goal is to demonstrate to Microsoft that the legacy stack can be reactivated with a thin compatibility layer, so that the preservation of these titles — and the achievement records users earned on them — is technically achievable.
 
+## Featured
+
+The project has been covered in the press as a potential path to revive hundreds of broken Windows 8-era Xbox Live titles:
+
+- **Pure Xbox** — [Xbox PC Project Might Have Solved How To Fix Hundreds Of Broken Windows Games](https://www.purexbox.com/news/2026/04/xbox-pc-project-might-have-solved-how-to-fix-hundreds-of-broken-windows-games)
+- **r/xbox** — [Microsoft Could Fix Hundreds Of Broken Xbox Games](https://www.reddit.com/r/xbox/comments/1srhvdy/microsoft_could_fix_hundreds_of_broken_xbox/)
+
+Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continuing to add more games — watch the [Status](#status) table and the changelog below.
+
+## Changelog
+
+### v1.1 — 2026-04-22
+
+- **New titles working end-to-end:** Microsoft Solitaire Collection, Microsoft Adera.
+- **XSts response forgery** for `auth.xboxlive.com/XSts/xsts.svc/IWSTrust13` (and `activeauth.xboxlive.com`). Microsoft's server rejects the legacy `WLID1.0` bootstrap tokens on post-deprecation accounts with `x-err: 0x8015DA87` + a bare WCF dispatcher fault — historically the dead-end for Adera and other `Microsoft.Xbox.dll`-based titles. The bridge now substitutes a valid WS-Trust 1.3 `RequestSecurityTokenResponseCollection` envelope carrying its own modern XBL JWT, letting the client proceed into the profile / progress / titlestorage fetch paths that the rest of the addon already bridges.
+- **Dead-host shim** for `data.xboxlive.com`. Microsoft retired the legacy XBL beacon endpoint; it still resolves but no longer accepts TCP connections. Adera blocks its sign-in state machine waiting for a 200 response here, so the bridge synthesizes a `200 OK` empty reply locally. mitmproxy runs with `connection_strategy=lazy` so it doesn't try to pre-connect to the unreachable upstream.
+- **Microsoft Solitaire Collection** added to the titlestorage `403 → 200(empty)` allowlist (titlegroup `b3288d02-ddca-4e7c-955a-06142d6e138e`).
+
+### v1.0 — Initial release
+
+- One-click **`launch.bat` / `stop.bat`** launcher: UAC self-elevation, `pip` install of Python deps, `cargo build` of `ticket_server`, mitmproxy CA install + trust, loopback exemptions, WinINET + WinHTTP proxy enable, and teardown.
+- `ticket_server` (Rust) — MBI_SSL ticket via `WebAuthenticationCoreManager` against the Windows-signed-in MSA.
+- `xbl_bridge.py` (mitmproxy addon) — exchanges MBI ticket → UserToken → XSTS, then rewrites legacy `Authorization: XBL2.0` headers to `XBL3.0` on `*.xboxlive.com` traffic, with `stats` / `communications` passthrough and a per-titlegroup titlestorage 403 shim.
+- Working titles: **Microsoft Mahjong**, **Microsoft Minesweeper**.
+
 ## Status
 
 > **Aim: every legacy Windows 8-era first-party Xbox Live title.**
-> **Currently: 2 of 2 tried, working.**
+> **Currently: 4 of 4 tried, working.**
 
 | Title | TitleId | Sign-in | Gamerpic | Legacy achievement list |
 |---|---|:---:|:---:|:---:|
 | Microsoft Mahjong (1.9.0.40714) | 1297290225 | ✓ | ✓ | ✓ |
 | Microsoft Minesweeper (2.9.1913.0) | 1297290226 | ✓ | ✓ | ✓ |
+| Microsoft Solitaire Collection (2.11.1807.1002) | 1297287741 | ✓ | ✓ | ✓ |
+| Microsoft Adera (2.5.2.34894) | 1297290206 | ✓ | ✓ | ✓ |
 
 Microsoft Mahjong with gamertag, gamerpic and its legacy XBL2-era achievement set all populating through the bridge:
 
