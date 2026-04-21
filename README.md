@@ -119,30 +119,52 @@ On each game request to `*.xboxlive.com`:
 
 ## Setup
 
-### Build
+### Quick start (one click)
+
+Double-click **`launch.bat`** at the repo root. It will:
+
+1. Self-elevate (UAC prompt — needed for cert install, WinHTTP proxy, and loopback exemptions),
+2. Install the Python dependencies (`mitmproxy`, `ecdsa`),
+3. Build `ticket_server` (cached after the first build),
+4. Generate + trust the mitmproxy CA in the Windows Local Machine root store,
+5. Grant loopback exemptions to the supported games,
+6. Open two helper windows — `ticket_server` (green) and `mitmdump` (yellow, with live intercept logging),
+7. Enable the WinINET + WinHTTP system proxies.
+
+Once it prints `READY`, launch Microsoft Mahjong or Microsoft Minesweeper from Start. The `mitmdump` window scrolls every request the bridge rewrites:
+
+```
+[xbl_bridge] bridged GET profile.xboxlive.com/users/me/id
+[xbl_bridge] bridged GET titlestorage.xboxlive.com/users/xuid(...)/storage/titlestorage/titlegroups/.../data/unverified/DailyChallengeSettings,json
+[xbl_bridge] titlestorage shim: GET 403->200(empty) /users/xuid(...)/.../DailyChallengeSettings,json
+```
+
+When you're done, press any key in the launcher window (or double-click **`stop.bat`**) to disable the proxies and stop the helpers. The CA and loopback exemptions stay installed so subsequent launches are near-instant.
+
+### Manual run
+
+If you prefer running the pieces by hand, in three separate terminals:
 
 ```
 cargo build --release
-```
-
-### Run
-
-In three terminals / sessions:
-
-```
-# 1. ticket server (keeps running)
 target\release\ticket_server.exe
+mitmdump -s addon\xbl_bridge.py --flow-detail 1
+```
 
-# 2. mitmproxy with the bridge addon
-mitmweb -s addon\xbl_bridge.py
+And enable the proxies:
 
-# 3. Enable the system proxy so the game routes through mitmproxy
-powershell -Command "Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -Name ProxyServer -Value '127.0.0.1:8080'; Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -Name ProxyEnable -Value 1"
-# Modern UWP games also use WinHTTP, which has a separate setting:
+```
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer /t REG_SZ /d 127.0.0.1:8080 /f
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f
 netsh winhttp set proxy proxy-server="127.0.0.1:8080" bypass-list="<-loopback>"
 ```
 
-Launch Mahjong or Minesweeper from the Start menu. Sign-in should resolve, the gamerpic should appear in the top-right, and the Awards page should populate with your legacy achievement set.
+Teardown:
+
+```
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f
+netsh winhttp reset proxy
+```
 
 ### Registering your own app (optional)
 
@@ -155,13 +177,6 @@ The bundled client ID is good enough to run this project; Microsoft issues you a
 5. Register, then copy the **Application (client) ID** GUID.
 6. Under **Authentication → Advanced settings**, set **Allow public client flows** to Yes.
 7. Replace `CLIENT_ID` in `src/bin/ticket_server.rs` and `src/bin/xal_probe.rs` with your GUID.
-
-### Tear-down
-
-```
-powershell -Command "Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -Name ProxyEnable -Value 0"
-netsh winhttp reset proxy
-```
 
 ## Scope
 
