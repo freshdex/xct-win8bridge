@@ -23,13 +23,24 @@ Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continu
 - **XSts response forgery** for `auth.xboxlive.com/XSts/xsts.svc/IWSTrust13` (and `activeauth.xboxlive.com`). Microsoft's server rejects the legacy `WLID1.0` bootstrap tokens on post-deprecation accounts with `x-err: 0x8015DA87` + a bare WCF dispatcher fault — historically the dead-end for Adera and other `Microsoft.Xbox.dll`-based titles. The bridge now substitutes a valid WS-Trust 1.3 `RequestSecurityTokenResponseCollection` envelope carrying its own modern XBL JWT, letting the client proceed into the profile / progress / titlestorage fetch paths that the rest of the addon already bridges.
 - **Dead-host shim** for `data.xboxlive.com`. Microsoft retired the legacy XBL beacon endpoint; it still resolves but no longer accepts TCP connections. Adera blocks its sign-in state machine waiting for a 200 response here, so the bridge synthesizes a `200 OK` empty reply locally. mitmproxy runs with `connection_strategy=lazy` so it doesn't try to pre-connect to the unreachable upstream.
 - **Microsoft Solitaire Collection** added to the titlestorage `403 → 200(empty)` allowlist (titlegroup `b3288d02-ddca-4e7c-955a-06142d6e138e`).
+- **One-click batch launcher** (`launch.bat` / `stop.bat`) — replaces the previous six-terminal manual setup. `launch.bat` self-elevates via UAC, then runs a 7-step pipeline:
+
+  1. **Dependency check** — verifies `python` and `cargo` are on `PATH` (fails fast with an install hint if not).
+  2. **Python deps** — `pip install --quiet --upgrade mitmproxy ecdsa` (idempotent; noop on re-runs).
+  3. **Build `ticket_server`** — `cargo build --release --bin ticket_server`; cached after the first build so subsequent runs are near-instant.
+  4. **mitmproxy CA bootstrap** — starts `mitmdump` briefly on a scratch port to generate `%USERPROFILE%\.mitmproxy\mitmproxy-ca-cert.cer` if it doesn't exist yet.
+  5. **CA trust** — `certutil -addstore Root` of the mitmproxy CA into `LocalMachine\Root` so UWP apps accept the MITM cert for `*.xboxlive.com`. Skipped if already present.
+  6. **Loopback exemptions** — `CheckNetIsolation LoopbackExempt -a -n=…` for every supported title's PackageFamilyName (Mahjong, Minesweeper, Solitaire Collection, Adera as of v1.1). Required so the AppContainer can reach `127.0.0.1:8080`.
+  7. **Helpers + proxies** — spawns `ticket_server.exe` (green window) and `mitmdump -s addon/xbl_bridge.py --flow-detail 1` (yellow window, live intercept log), then enables both the WinINET (HKCU registry) and WinHTTP (`netsh winhttp set proxy`) system proxies pointing at `127.0.0.1:8080`.
+
+  `stop.bat` reverses only the volatile state: WinINET proxy off, WinHTTP reset to direct, `mitmdump` / `mitmweb` / `ticket_server` killed. It deliberately leaves the mitmproxy CA and loopback exemptions installed so re-runs of `launch.bat` skip steps 4–6 entirely.
 
 ### v1.0 — Initial release
 
-- One-click **`launch.bat` / `stop.bat`** launcher: UAC self-elevation, `pip` install of Python deps, `cargo build` of `ticket_server`, mitmproxy CA install + trust, loopback exemptions, WinINET + WinHTTP proxy enable, and teardown.
 - `ticket_server` (Rust) — MBI_SSL ticket via `WebAuthenticationCoreManager` against the Windows-signed-in MSA.
 - `xbl_bridge.py` (mitmproxy addon) — exchanges MBI ticket → UserToken → XSTS, then rewrites legacy `Authorization: XBL2.0` headers to `XBL3.0` on `*.xboxlive.com` traffic, with `stats` / `communications` passthrough and a per-titlegroup titlestorage 403 shim.
 - Working titles: **Microsoft Mahjong**, **Microsoft Minesweeper**.
+- Setup was manual at this stage — Python dep install, cargo build, mitmproxy CA trust, loopback exemptions and proxy enable were all separate terminal commands in the README. The batch launcher in v1.1 collapses that into a single double-click.
 
 ## Status
 
