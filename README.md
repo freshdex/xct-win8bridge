@@ -51,6 +51,14 @@ Microsoft Minesweeper likewise — same bridge, no title-specific code:
 
 ![Microsoft Minesweeper — signed in, avatar loaded, legacy achievements rendered](docs/minesweeper-achievements.png)
 
+Microsoft Solitaire Collection — gamertag, gamerscore, full Awards grid and Daily Challenge badges all populated:
+
+![Microsoft Solitaire Collection — Awards page with Medals, Daily Challenge Badges, and game-specific achievement tiles](docs/solitaire-achievements.png)
+
+Microsoft Adera — unlocked by v1.1's XSts response forgery. Gamerscore 577030 + the General and Adera: The Shifting Sands achievement sets rendering:
+
+![Microsoft Adera — Achievements page with General and Adera: The Shifting Sands achievement sets, gamerscore 577030](docs/adera-achievements.png)
+
 Daily Challenge loaders in Mahjong are blocked by a separate, unrelated problem — the Arkadium backend that hosts the challenge content is itself decommissioned. That's out of scope here and lives under a different umbrella.
 
 ## Why this is Microsoft-friendly
