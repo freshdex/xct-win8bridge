@@ -16,8 +16,10 @@ use std::net::{TcpListener, TcpStream};
 use windows::core::HSTRING;
 use windows::Security::Authentication::Web::Core::{
     WebAuthenticationCoreManager, WebTokenRequest, WebTokenRequestPromptType,
-    WebTokenRequestStatus,
+    WebTokenRequestResult, WebTokenRequestStatus,
 };
+use windows::Win32::System::Console::GetConsoleWindow;
+use windows::Win32::System::WinRT::IWebAuthenticationCoreManagerInterop;
 
 const CLIENT_ID: &str = "dbccc2ba-1cf6-48b8-bf7e-892d6ad6f6b3";
 const XBL_SCOPE: &str = "service::user.auth.xboxlive.com::MBI_SSL";
@@ -160,13 +162,23 @@ fn get_msa_ticket() -> Result<(String, String), String> {
         .map_err(|e| format!("ResponseStatus: {}", e))?;
 
     // Escalate to interactive prompt only if the broker tells us it needs
-    // user interaction — e.g. first-time consent.
+    // user interaction — e.g. first-time consent. WebAuthenticationCoreManager
+    // is a UWP API that wants a CoreWindow by default; console (Win32) apps
+    // have no CoreWindow, so a plain RequestTokenAsync returns 0x80073B27.
+    // The interop interface's RequestTokenForWindowAsync takes an HWND
+    // instead, which is exactly the "desktop-app entry point" we need.
+    // GetConsoleWindow() yields our parent console's HWND under `start /B`.
     let result = if status == WebTokenRequestStatus::UserInteractionRequired {
         eprintln!("silent failed: UserInteractionRequired; prompting user once...");
-        WebAuthenticationCoreManager::RequestTokenAsync(&request)
-            .map_err(|e| format!("RequestTokenAsync: {}", e))?
-            .get()
-            .map_err(|e| format!("RequestTokenAsync.get: {}", e))?
+        let interop: IWebAuthenticationCoreManagerInterop =
+            windows::core::factory::<WebAuthenticationCoreManager, IWebAuthenticationCoreManagerInterop>()
+                .map_err(|e| format!("factory IWebAuthenticationCoreManagerInterop: {}", e))?;
+        let hwnd = unsafe { GetConsoleWindow() };
+        unsafe {
+            interop
+                .RequestTokenForWindowAsync::<_, WebTokenRequestResult>(hwnd, &request)
+                .map_err(|e| format!("RequestTokenForWindowAsync: {}", e))?
+        }
     } else {
         result
     };

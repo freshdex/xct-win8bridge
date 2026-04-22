@@ -17,6 +17,10 @@ Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continu
 
 ## Changelog
 
+### v1.2.1 — 2026-04-22
+
+- **First-time MSA consent fix.** A user reported the bridge bootstrap timing out on a fresh machine with `ticket error: RequestTokenAsync: Resource Contexts may not be created on threads that do not have a CoreWindow. (0x80073B27)`. `WebAuthenticationCoreManager::RequestTokenAsync` is a UWP entry point that requires a `CoreWindow`, which a Win32 console app like `ticket_server` doesn't have — so WAM's first-run consent dialog couldn't render and the call hung until the addon's 10-second timeout. Fixed by switching the `UserInteractionRequired` escalation path to `IWebAuthenticationCoreManagerInterop::RequestTokenForWindowAsync`, the desktop-app interop variant that takes a Win32 `HWND` (we pass `GetConsoleWindow()`). Rebuilt `bin/ticket_server.exe`. Only affected users who'd never consented to the bundled client ID before; cached-token flows on already-set-up machines were unaffected.
+
 ### v1.2 — 2026-04-22
 
 Quality-of-life pass on `launch.bat`. No new titles, no protocol changes — every behaviour from v1.1 is preserved.
