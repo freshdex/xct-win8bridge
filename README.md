@@ -17,6 +17,10 @@ Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continu
 
 ## Changelog
 
+### v1.2.2 — 2026-04-22
+
+- **Follow-up to v1.2.1's first-run consent fix.** v1.2.1 correctly switched from `RequestTokenAsync` to `IWebAuthenticationCoreManagerInterop::RequestTokenForWindowAsync`, but passed the wrong generic type parameter for the result — `WebTokenRequestResult` instead of `IAsyncOperation<WebTokenRequestResult>`. The windows-rs interop binding uses that generic to `QueryInterface` the returned raw pointer, and since the method actually returns an async operation (this is a `*Async` method), the QI failed with `No such interface supported (0x80004002)` before the consent dialog ever got a chance to render. Fixed to pass `IAsyncOperation<WebTokenRequestResult>` and `.get()` it. Also logs the `GetConsoleWindow()` HWND to the ticket_server log and errors out cleanly with a diagnostic message if it comes back NULL.
+
 ### v1.2.1 — 2026-04-22
 
 - **First-time MSA consent fix.** A user reported the bridge bootstrap timing out on a fresh machine with `ticket error: RequestTokenAsync: Resource Contexts may not be created on threads that do not have a CoreWindow. (0x80073B27)`. `WebAuthenticationCoreManager::RequestTokenAsync` is a UWP entry point that requires a `CoreWindow`, which a Win32 console app like `ticket_server` doesn't have — so WAM's first-run consent dialog couldn't render and the call hung until the addon's 10-second timeout. Fixed by switching the `UserInteractionRequired` escalation path to `IWebAuthenticationCoreManagerInterop::RequestTokenForWindowAsync`, the desktop-app interop variant that takes a Win32 `HWND` (we pass `GetConsoleWindow()`). Rebuilt `bin/ticket_server.exe`. Only affected users who'd never consented to the bundled client ID before; cached-token flows on already-set-up machines were unaffected.
