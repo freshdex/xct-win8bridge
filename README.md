@@ -17,6 +17,20 @@ Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continu
 
 ## Changelog
 
+### v1.2 — 2026-04-22
+
+Quality-of-life pass on `launch.bat`. No new titles, no protocol changes — every behaviour from v1.1 is preserved.
+
+- **Bundled `bin/ticket_server.exe`.** The Rust helper is now committed to the repo (180 KB), so end-users no longer need a Rust toolchain at all. `launch.bat` resolves `ticket_server` in this order: `target\release\ticket_server.exe` (contributor's fresh `cargo` build) → `bin\ticket_server.exe` (bundled) → `cargo build` fallback if `cargo` happens to be on `PATH`. A fresh-machine, no-Rust install now goes straight from "double-click `launch.bat`" to working sign-in with no toolchain prompts.
+- **Auto-update.** `launch.bat` carries a `LAUNCHER_VERSION` constant and queries `GET /repos/freshdex/xct-win8bridge/releases/latest` on every run. If the remote tag parses to a strictly-greater `[version]`, it downloads `/archive/refs/tags/<tag>.zip`, extracts to `%TEMP%`, hands off to a one-shot helper batch (so `launch.bat` isn't overwriting itself mid-execution — that corrupts cmd.exe's line-seek), `robocopy`s the new tree over the install (preserving `target\`, `.git\`, `captures\`, `patches\`, `build\`), and relaunches with `XCT_JUST_UPDATED=1` set so the child skips a redundant check. Skipped automatically if `.git\` is present (contributor checkouts manage their own version) or if the API call fails (offline).
+- **Single-window UX.** Previously the launcher spawned two extra cmd windows (`ticket_server` green, `mitmdump` yellow) and itself parked at "Press any key to stop". Now `ticket_server` runs hidden via `start "" /B` with stdio captured to `%TEMP%\xct_ticket_server.log` and tied to the launcher's console (closing the window kills it cleanly), and `mitmdump` runs in the foreground of the launcher window itself. Setup output scrolls past, then the live `[xbl_bridge]` intercept log takes over. A `GET /health` probe of `ticket_server` runs before proxies are enabled — if it fails, the launcher tails the log, kills the helper, and exits with a clear error rather than booting into a broken state.
+- **mitmdump output filtered to `*.xboxlive.com`.** Adds `~d xboxlive.com` as the positional view filter so general browsing traffic the user happens to do while the bridge is running (Reddit, Google, etc.) no longer scrolls past in the launcher window. The addon still sees every flow — the filter only suppresses per-flow logging; bridged-host lines and `[xbl_bridge]` messages are unaffected.
+- **Stop instructions in the READY banner.** Lists the four supported titles with their full PackageFamilyNames and tells the user explicitly: `Ctrl+C` then `N` at "Terminate batch job (Y/N)?" lets `stop.bat` run; `Y` aborts and leaves the system proxy pointed at `127.0.0.1:8080`, so run `stop.bat` manually if that happens.
+- **Robust mitmdump path resolution.** A common end-user trap: if mitmproxy's standalone Windows installer is on `PATH`, its `mitmdump.exe` ships an embedded Python that can't see the `ecdsa` package the launcher just `pip install`'d, and the addon errors on import. The launcher now resolves the pip-installed Scripts dir via `sysconfig.get_path('scripts')` (with `sys.prefix\Scripts` and `site.getusersitepackages()`-derived user scheme as fallbacks, so it works on Python 3.14 where `sysconfig` no longer accepts `'nt_user'` as a path name) and prepends it to `PATH` for spawned processes, so the pip-installed `mitmdump` always wins.
+- **`.github/workflows/release.yml`.** Tag-triggered (`v*`) Windows build of `ticket_server.exe`, attached to the GitHub release via `softprops/action-gh-release`. This is what makes `/releases/latest` resolve for the auto-update check, and gives maintainers a way to rebuild the helper without a local Rust toolchain (workflow_dispatch → download artifact → drop into `bin/` → commit).
+- **ASCII-only batch files.** Replaced em-dashes that were mangling on cmd.exe's default OEM code page (`ÔÇö`).
+- **Achievements column** in the Status table renamed from "Legacy achievement list".
+
 ### v1.1 — 2026-04-22
 
 - **New titles working end-to-end:** Microsoft Solitaire Collection, Microsoft Adera.
@@ -25,9 +39,9 @@ Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continu
 - **Microsoft Solitaire Collection** added to the titlestorage `403 → 200(empty)` allowlist (titlegroup `b3288d02-ddca-4e7c-955a-06142d6e138e`).
 - **One-click batch launcher** (`launch.bat` / `stop.bat`) — replaces the previous six-terminal manual setup. `launch.bat` self-elevates via UAC, then runs a 7-step pipeline:
 
-  1. **Dependency check** — verifies `python` and `cargo` are on `PATH` (fails fast with an install hint if not).
+  1. **Dependency check** — verifies `python` is on `PATH` (fails fast with an install hint if not). Rust is no longer required for end-users.
   2. **Python deps** — `pip install --quiet --upgrade mitmproxy ecdsa` (idempotent; noop on re-runs).
-  3. **Build `ticket_server`** — `cargo build --release --bin ticket_server`; cached after the first build so subsequent runs are near-instant.
+  3. **Locate `ticket_server.exe`** — prefers `target\release\ticket_server.exe` (contributor build), otherwise uses the committed `bin\ticket_server.exe`. Falls back to `cargo build --release --bin ticket_server` only if neither exists and `cargo` is on `PATH`.
   4. **mitmproxy CA bootstrap** — starts `mitmdump` briefly on a scratch port to generate `%USERPROFILE%\.mitmproxy\mitmproxy-ca-cert.cer` if it doesn't exist yet.
   5. **CA trust** — `certutil -addstore Root` of the mitmproxy CA into `LocalMachine\Root` so UWP apps accept the MITM cert for `*.xboxlive.com`. Skipped if already present.
   6. **Loopback exemptions** — `CheckNetIsolation LoopbackExempt -a -n=…` for every supported title's PackageFamilyName (Mahjong, Minesweeper, Solitaire Collection, Adera as of v1.1). Required so the AppContainer can reach `127.0.0.1:8080`.
@@ -47,7 +61,7 @@ Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continu
 > **Aim: every legacy Windows 8-era first-party Xbox Live title.**
 > **Currently: 4 of 4 tried, working.**
 
-| Title | TitleId | Sign-in | Gamerpic | Legacy achievement list |
+| Title | TitleId | Sign-in | Gamerpic | Achievements |
 |---|---|:---:|:---:|:---:|
 | Microsoft Mahjong (1.9.0.40714) | 1297290225 | ✓ | ✓ | ✓ |
 | Microsoft Minesweeper (2.9.1913.0) | 1297290226 | ✓ | ✓ | ✓ |
@@ -146,7 +160,7 @@ On each game request to `*.xboxlive.com`:
   pip install mitmproxy ecdsa
   ```
 
-- Rust (stable) — only to build `ticket_server`:
+- Rust (stable) — **only if building `ticket_server` from source.** The repo ships a prebuilt `bin\ticket_server.exe` so end-users do not need Rust and `launch.bat` works offline out of the box. Install Rust only if you're working on the helper itself:
 
   ```
   cargo build --release --bin ticket_server
@@ -167,15 +181,19 @@ On each game request to `*.xboxlive.com`:
 
 ### Quick start (one click)
 
-Double-click **`launch.bat`** at the repo root. It will:
+Double-click **`launch.bat`** at the repo root. Everything runs in a single console window — setup output scrolls past, then `mitmdump`'s live intercept log takes over. The launcher will:
 
 1. Self-elevate (UAC prompt — needed for cert install, WinHTTP proxy, and loopback exemptions),
-2. Install the Python dependencies (`mitmproxy`, `ecdsa`),
-3. Build `ticket_server` (cached after the first build),
-4. Generate + trust the mitmproxy CA in the Windows Local Machine root store,
-5. Grant loopback exemptions to the supported games,
-6. Open two helper windows — `ticket_server` (green) and `mitmdump` (yellow, with live intercept logging),
-7. Enable the WinINET + WinHTTP system proxies.
+2. Check GitHub for a newer tagged release and auto-update itself in place if one exists (skipped offline or if you have a `.git` checkout),
+3. Install the Python dependencies (`mitmproxy`, `ecdsa`),
+4. Use the bundled `bin\ticket_server.exe` (or a locally-built one if you have Rust),
+5. Generate + trust the mitmproxy CA in the Windows Local Machine root store,
+6. Grant loopback exemptions to the supported games,
+7. Start `ticket_server` hidden in the background (log: `%TEMP%\xct_ticket_server.log`),
+8. Enable the WinINET + WinHTTP system proxies,
+9. Run `mitmdump` in the foreground of the launcher window.
+
+**To stop**: press `Ctrl+C`, then type `N` at the "Terminate batch job (Y/N)?" prompt. `N` lets `stop.bat` run and reverses the proxy changes. `Y` aborts immediately and leaves the proxies pointed at `127.0.0.1:8080` — if that happens, double-click `stop.bat` to recover.
 
 Once it prints `READY`, launch Microsoft Mahjong or Microsoft Minesweeper from Start. The `mitmdump` window scrolls every request the bridge rewrites:
 

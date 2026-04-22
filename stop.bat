@@ -1,5 +1,5 @@
 @echo off
-rem xct-win8bridge teardown — reverse launch.bat.
+rem xct-win8bridge teardown -- reverse launch.bat.
 
 setlocal
 cd /d "%~dp0"
