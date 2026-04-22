@@ -17,6 +17,10 @@ Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continu
 
 ## Changelog
 
+### v1.2.3 — 2026-04-22
+
+- **Quieter launcher output.** v1.2 added mitmproxy's `~d xboxlive.com` view filter to suppress per-flow log lines for general browsing traffic, but `client connect` / `server connect` events fire at the proxy layer *before* a flow exists, so Discord / Google / gstatic / etc. still scrolled past in the launcher window. Fixed by installing a Python `logging.Filter` in `xbl_bridge.py`'s `running()` hook that content-filters records containing `client connect` / `server connect` / `client disconnect` / `server disconnect` out of every handler on the root logger. The `[xbl_bridge]` messages and xboxlive-host flow lines are unaffected.
+
 ### v1.2.2 — 2026-04-22
 
 - **Follow-up to v1.2.1's first-run consent fix.** v1.2.1 correctly switched from `RequestTokenAsync` to `IWebAuthenticationCoreManagerInterop::RequestTokenForWindowAsync`, but passed the wrong generic type parameter for the result — `WebTokenRequestResult` instead of `IAsyncOperation<WebTokenRequestResult>`. The windows-rs interop binding uses that generic to `QueryInterface` the returned raw pointer, and since the method actually returns an async operation (this is a `*Async` method), the QI failed with `No such interface supported (0x80004002)` before the consent dialog ever got a chance to render. Fixed to pass `IAsyncOperation<WebTokenRequestResult>` and `.get()` it. Also logs the `GetConsoleWindow()` HWND to the ticket_server log and errors out cleanly with a diagnostic message if it comes back NULL.

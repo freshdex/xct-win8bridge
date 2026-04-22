@@ -36,6 +36,7 @@ import base64
 import datetime
 import hashlib
 import json
+import logging
 import os
 import re
 import ssl
@@ -349,6 +350,33 @@ def _mint_xsts(user_token: str, relying_party: str = XBOXLIVE_RP,
 
 # --- addon ------------------------------------------------------------------
 
+class _SuppressConnectionEvents(logging.Filter):
+    """Hide mitmproxy's per-TCP-connection chatter from the terminal.
+
+    mitmproxy's view filter (`~d xboxlive.com` on the command line) only
+    suppresses per-*flow* log lines. Connection-level events fire earlier
+    in the pipeline — before a flow exists — so the user's general
+    browsing traffic (Discord, Google, Discord CDN, gstatic, etc.) still
+    shows up as `client connect` / `server connect` lines in the launcher
+    window even with the flow filter in place. Content-filter those
+    specific messages here so the launcher stays focused on xboxlive.com.
+    """
+
+    _NEEDLES = (
+        "client connect",
+        "server connect",
+        "client disconnect",
+        "server disconnect",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        return not any(n in msg for n in self._NEEDLES)
+
+
 class XblBridge:
     def __init__(self) -> None:
         self.signer: RequestSigner | None = None
@@ -362,6 +390,13 @@ class XblBridge:
         self.signed = 0
 
     def running(self) -> None:
+        # Attach the connection-event suppressor to every registered log
+        # handler. mitmproxy's termlog addon installs its handler on the
+        # root logger by the time `running` fires.
+        _quiet = _SuppressConnectionEvents()
+        for h in logging.getLogger().handlers:
+            h.addFilter(_quiet)
+
         try:
             self._bootstrap()
         except Exception as exc:
