@@ -8,7 +8,7 @@ cd /d "%~dp0"
 rem === Launcher version -- BUMP this before tagging a release on GitHub.
 rem     launch.bat auto-updates by comparing this against the latest release
 rem     tag; a forgotten bump means users ship-loop re-downloading.
-set "LAUNCHER_VERSION=v1.3"
+set "LAUNCHER_VERSION=v1.4"
 
 rem --- self-elevate ----------------------------------------------------------
 net session >nul 2>&1
@@ -261,7 +261,11 @@ rem otherwise gates on packagespc.xboxlive.com/GetBasePackage which the
 rem bridge's generic XSTS doesn't pass -- handled by the packagespc 403
 rem shim in xbl_bridge.py.
 CheckNetIsolation LoopbackExempt -a -n="39C668CD.HitmanGO_r7bfsmp40f67j"                       >nul 2>&1
-echo       Mahjong, Minesweeper, Solitaire Collection, Adera, Taptiles, Wordament, RocketRiot, TY, AC Pirates, Hitman GO exempted.
+rem Hydro Thunder Hurricane -- Microsoft Studios (Vector Unit) Win8 port.
+rem Stock package activates; bridge handles legacy XBL2.0 sign-in via the
+rem always-rewrite policy.
+CheckNetIsolation LoopbackExempt -a -n="Microsoft.Studios.HydroThunderHurricane_8wekyb3d8bbwe" >nul 2>&1
+echo       Mahjong, Minesweeper, Solitaire Collection, Adera, Taptiles, Wordament, RocketRiot, TY, AC Pirates, Hitman GO, Hydro Thunder exempted.
 
 rem --- start ticket_server hidden, fall back to visible on cold consent -----
 rem Default to hidden for a clean single-window UX. Once WAM has cached

@@ -17,6 +17,12 @@ Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continu
 
 ## Changelog
 
+### v1.4 — 2026-04-25
+
+- **New title working end-to-end:** Hydro Thunder Hurricane (Microsoft Studios / Vector Unit Win8 port, TitleId `1297290211`). After unlocking the loopback gate, the title's full Win8 SDK 2.0 sign-in chain (`auth.xboxlive.com/XSts` legacy SOAP → `profile.xboxlive.com` profile fetch → `titlestorage.xboxlive.com` cloud save load) goes through the bridge cleanly. Earned achievements unlock and render in the in-game Achievements page.
+- **Diagnostic note on Hydro Thunder's achievement model.** Unlike Mahjong / Solitaire / Hitman GO, HTH does not query `achievements.xboxlive.com` for unlock state — its AppxManifest doesn't even register `Microsoft.Xbox.Achievements`. The unlock state is encoded in the user's cloud save (`titlestorage.xboxlive.com/.../titlegroups/4a298c23-56ff-4089-95e0-2b81a51e5a7d/data/unverified/cloudsave…`, magic `SCUV…`), so achievements appear as the player earns them in this Win8 build; pre-existing Xbox 360-era unlocks for the same TitleId don't carry across because Microsoft never migrated them into the Win8 SDK 2.0 cloudsave format. No code change needed here — the bridge correctly fetches the save and the title reads its own state from it.
+- **Hydro Thunder Hurricane loopback exemption** added to step 5 of `launch.bat` (`CheckNetIsolation LoopbackExempt -a -n=Microsoft.Studios.HydroThunderHurricane_8wekyb3d8bbwe`). Without this, the UWP AppContainer blocks all `127.0.0.1` connections and the title's traffic never reaches the bridge — sign-in fails with the generic `Sorry, we can't sign you in. Try signing in at Xbox.com, then start this app again.` dialog.
+
 ### v1.3 — 2026-04-25
 
 - **New title working end-to-end:** Hitman GO (Square Enix Win8.1 port). Achievements list populates as captured below.
@@ -81,7 +87,7 @@ Quality-of-life pass on `launch.bat`. No new titles, no protocol changes — eve
 ## Status
 
 > **Aim: every legacy Windows 8-era first-party Xbox Live title.**
-> **Currently: 5 of 5 tried, working.**
+> **Currently: 6 of 6 tried, working.**
 
 | Title | TitleId | Sign-in | Gamerpic | Achievements |
 |---|---|:---:|:---:|:---:|
@@ -90,6 +96,7 @@ Quality-of-life pass on `launch.bat`. No new titles, no protocol changes — eve
 | Microsoft Solitaire Collection (2.11.1807.1002) | 1297287741 | ✓ | ✓ | ✓ |
 | Microsoft Adera (2.5.2.34894) | 1297290206 | ✓ | ✓ | ✓ |
 | Hitman GO (1.0.52.0, Square Enix) | 1397824345 | ✓ | n/a | ✓ |
+| Hydro Thunder Hurricane (1.2.5.0, Microsoft Studios / Vector Unit) | 1297290211 | ✓ | n/a | ✓ |
 
 Microsoft Mahjong with gamertag, gamerpic and its legacy XBL2-era achievement set all populating through the bridge:
 
@@ -110,6 +117,10 @@ Microsoft Adera — unlocked by v1.1's XSts response forgery. Gamerscore 577030 
 Hitman GO — first non-Microsoft-published Win8.1 title to come up on the bridge. v1.3's "always rewrite `XBL2.0` → `XBL3.0`" change unblocked the `profile.xboxlive.com` 401 that the prior reactive-forgery logic missed for this MSA cohort, and the new `packagespc.xboxlive.com/GetBasePackage` 403→200 shim got the game past its pre-achievements package-validation gate. Achievement set rendering with the Two For One unlock visible:
 
 ![Hitman GO — Achievements page with Two For One unlocked, Game-Set-Match / Party's Over / Wedding Crasher locked tiles rendering](docs/hitman-achievements.png)
+
+Hydro Thunder Hurricane — Microsoft Studios / Vector Unit Win8 port. Unusually for the portfolio, this title doesn't query an achievements service at all: unlock state is encoded in the user's `titlestorage` cloud save (a `SCUV`-magic binary in the title's titlegroup). The bridge gets the legacy `auth.xboxlive.com/XSts` SOAP → `profile.xboxlive.com` → cloud-save load chain through cleanly, and unlocks register as the player earns them. Splish Splash + Spare Change shown unlocked after a single race:
+
+![Hydro Thunder Hurricane — Achievements page with Splish Splash and Spare Change unlocked, remaining tiles locked, 3,375 CR shown](docs/hydro-thunder-achievements.png)
 
 Daily Challenge loaders in Mahjong are blocked by a separate, unrelated problem — the Arkadium backend that hosts the challenge content is itself decommissioned. That's out of scope here and lives under a different umbrella.
 
