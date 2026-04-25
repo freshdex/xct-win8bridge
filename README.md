@@ -17,6 +17,16 @@ Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continu
 
 ## Changelog
 
+### v1.3 — 2026-04-25
+
+- **New title working end-to-end:** Hitman GO (Square Enix Win8.1 port). Achievements list populates as captured below.
+- **Always rewrite `XBL2.0` → `XBL3.0`** on every non-`stats` / non-`communications` host, regardless of whether the upstream legacy `auth.xboxlive.com/XSts` mints a real `<jwt>` for this MSA. v1.1's reactive forgery added a `_legacy_backend_works` early-out on the theory that "if XSts mints a token, the rest of the legacy XBL2 chain still works for this user — stay native and Microsoft-friendly." Hitman GO disproved that: this MSA's `XSts` *does* return a real XBL2 JWT, but `profile.xboxlive.com` then rejects the `Authorization: XBL2.0 x=<jwt v="1.0" t=".../>` XML wrapper with `401 token_required` — the legacy services no longer parse it. The bridge now always swaps the header (still touching nothing else; the v1.0 invariant about leaving body / `x-xbl-contract-version` alone is unchanged), so Hitman GO's profile / achievements / etc. fetches succeed. `_handle_xsts_response`'s cohort observation is kept as an informational log line.
+- **`packagespc.xboxlive.com/GetBasePackage/<guid>` 403 → 200(empty) shim.** Hitman GO's pre-achievements package-validation gate; our generic `RelyingParty=http://xboxlive.com` XSTS isn't title-scoped so the call 403s, and the game treats that as "Xbox Live unavailable" and never proceeds to the achievement service. The shim is universal (other Microsoft.Xbox.dll titles in the portfolio don't gate on it).
+- **`[xbl_bridge] XBL-TRACE` per-flow log line for every `*.xboxlive.com` request/response** (skipping high-frequency `titlestorage` / `userpresence` polls, which already have their own log mechanisms). Captures method, URL, status, request `Authorization` (truncated), request body and response body so the rolling `xct_mitmdump.log` is enough to diagnose any title-side failure without bouncing to a separate proxy. Disable with `XCT_TRACE_XBL=0`.
+- **Beefed-up 4xx/5xx warning line** — now also dumps request `Authorization`, request body, response body, `WWW-Authenticate` and `x-err`.
+- **Hitman GO loopback exemption** added to step 5 of `launch.bat` (`CheckNetIsolation LoopbackExempt -a -n=39C668CD.HitmanGO_r7bfsmp40f67j`).
+- **Watcher VBS escape fix** in `launch.bat`. The auto-stop watcher's `xct_watcher.vbs` was being written truncated (`Set WshShell = CreateObject("WScript.Shell"` — missing closing paren) because the unescaped `)` inside `CreateObject("WScript.Shell")` was prematurely terminating the surrounding `if defined LAUNCHER_PID ( ... )` block. `cscript` then errored out with `Microsoft VBScript compilation error: Expected ')'` and the watcher never started, so `stop.bat` only ran via the inline `call` at the end of `launch.bat` — closing the launcher window via the X button skipped cleanup. Escaped as `^)`. Cleanup is now reliable.
+
 ### v1.2.3 — 2026-04-22
 
 - **Quieter launcher output.** v1.2 added mitmproxy's `~d xboxlive.com` view filter to suppress per-flow log lines for general browsing traffic, but `client connect` / `server connect` events fire at the proxy layer *before* a flow exists, so Discord / Google / gstatic / etc. still scrolled past in the launcher window. Fixed by installing a Python `logging.Filter` in `xbl_bridge.py`'s `running()` hook that content-filters records containing `client connect` / `server connect` / `client disconnect` / `server disconnect` out of every handler on the root logger. The `[xbl_bridge]` messages and xboxlive-host flow lines are unaffected.
@@ -71,7 +81,7 @@ Quality-of-life pass on `launch.bat`. No new titles, no protocol changes — eve
 ## Status
 
 > **Aim: every legacy Windows 8-era first-party Xbox Live title.**
-> **Currently: 4 of 4 tried, working.**
+> **Currently: 5 of 5 tried, working.**
 
 | Title | TitleId | Sign-in | Gamerpic | Achievements |
 |---|---|:---:|:---:|:---:|
@@ -79,6 +89,7 @@ Quality-of-life pass on `launch.bat`. No new titles, no protocol changes — eve
 | Microsoft Minesweeper (2.9.1913.0) | 1297290226 | ✓ | ✓ | ✓ |
 | Microsoft Solitaire Collection (2.11.1807.1002) | 1297287741 | ✓ | ✓ | ✓ |
 | Microsoft Adera (2.5.2.34894) | 1297290206 | ✓ | ✓ | ✓ |
+| Hitman GO (1.0.52.0, Square Enix) | 1397824345 | ✓ | n/a | ✓ |
 
 Microsoft Mahjong with gamertag, gamerpic and its legacy XBL2-era achievement set all populating through the bridge:
 
@@ -95,6 +106,10 @@ Microsoft Solitaire Collection — gamertag, gamerscore, full Awards grid and Da
 Microsoft Adera — unlocked by v1.1's XSts response forgery. Gamerscore 577030 + the General and Adera: The Shifting Sands achievement sets rendering:
 
 ![Microsoft Adera — Achievements page with General and Adera: The Shifting Sands achievement sets, gamerscore 577030](docs/adera-achievements.png)
+
+Hitman GO — first non-Microsoft-published Win8.1 title to come up on the bridge. v1.3's "always rewrite `XBL2.0` → `XBL3.0`" change unblocked the `profile.xboxlive.com` 401 that the prior reactive-forgery logic missed for this MSA cohort, and the new `packagespc.xboxlive.com/GetBasePackage` 403→200 shim got the game past its pre-achievements package-validation gate. Achievement set rendering with the Two For One unlock visible:
+
+![Hitman GO — Achievements page with Two For One unlocked, Game-Set-Match / Party's Over / Wedding Crasher locked tiles rendering](docs/hitman-achievements.png)
 
 Daily Challenge loaders in Mahjong are blocked by a separate, unrelated problem — the Arkadium backend that hosts the challenge content is itself decommissioned. That's out of scope here and lives under a different umbrella.
 

@@ -8,7 +8,7 @@ cd /d "%~dp0"
 rem === Launcher version -- BUMP this before tagging a release on GitHub.
 rem     launch.bat auto-updates by comparing this against the latest release
 rem     tag; a forgotten bump means users ship-loop re-downloading.
-set "LAUNCHER_VERSION=v1.2.3"
+set "LAUNCHER_VERSION=v1.3"
 
 rem --- self-elevate ----------------------------------------------------------
 net session >nul 2>&1
@@ -28,6 +28,22 @@ echo   xct-win8bridge launcher  %LAUNCHER_VERSION%
 echo   https://github.com/freshdex/xct-win8bridge
 echo ============================================================
 echo.
+
+rem --- pre-flight teardown ---------------------------------------------------
+rem If a previous launch.bat run was killed before its watcher could fire
+rem stop.bat (force-killed via Task Manager, system crash, the watcher
+rem race-lost to a slow proxy unset, etc.), the system still has the old
+rem proxy registry pointed at 127.0.0.1:<old port> with no listener -- and
+rem step [1/7]'s pip install then fails with WinError 10061 ("target
+rem machine actively refused"). Wipe stale proxy + helper state up-front
+rem so each launch can come up clean even if the prior one didn't shut
+rem down properly. Idempotent: a normal launch starts with no stale state
+rem and these are no-ops.
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f >nul 2>&1
+netsh winhttp reset proxy >nul 2>&1
+taskkill /F /IM mitmdump.exe      >nul 2>&1
+taskkill /F /IM mitmweb.exe       >nul 2>&1
+taskkill /F /IM ticket_server.exe >nul 2>&1
 
 rem --- auto-update check -----------------------------------------------------
 rem Skip if: we just updated in this session, or the user has a git checkout
@@ -95,6 +111,27 @@ start "" "%HELPER%"
 exit /b 0
 
 :update_done
+
+rem --- port selection --------------------------------------------------------
+rem Default mitmproxy listen port is 8080. That collides with SABnzbd,
+rem Tomcat, common dev servers, etc. Walk a fallback ladder of ports and
+rem silently use the first free one -- no user prompt.
+set "MITM_PORT="
+for %%P in (8080 8081 8082 8083 8084 8085 8086 8087 18080 18081 18082 18083) do (
+    if not defined MITM_PORT (
+        powershell -NoProfile -Command "try { $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, %%P); $l.Start(); $l.Stop(); exit 0 } catch { exit 1 }"
+        if not errorlevel 1 set "MITM_PORT=%%P"
+    )
+)
+if not defined MITM_PORT (
+    echo [!] No free port found in 8080..8087 / 18080..18083. Aborting.
+    echo     Free up one of those ports or extend the search list near the
+    echo     top of launch.bat.
+    pause & exit /b 1
+)
+if not "%MITM_PORT%"=="8080" (
+    echo [*] Port 8080 in use -- automatically using %MITM_PORT% instead.
+)
 
 rem --- dependency checks -----------------------------------------------------
 where python >nul 2>&1
@@ -185,14 +222,58 @@ CheckNetIsolation LoopbackExempt -a -n="Microsoft.MicrosoftMahjong_8wekyb3d8bbwe
 CheckNetIsolation LoopbackExempt -a -n="Microsoft.MicrosoftMinesweeper_8wekyb3d8bbwe"         >nul 2>&1
 CheckNetIsolation LoopbackExempt -a -n="Microsoft.MicrosoftSolitaireCollection_8wekyb3d8bbwe" >nul 2>&1
 CheckNetIsolation LoopbackExempt -a -n="Microsoft.Adera_8wekyb3d8bbwe"                        >nul 2>&1
-echo       Mahjong, Minesweeper, Solitaire Collection, Adera exempted.
+rem Microsoft Taptiles -- xct-taptiles-patcher offers two install paths,
+rem both supported here. Exempt both PFNs so whichever path the user took
+rem works. patch-and-install.ps1 preserves identity (PFN ends 8wekyb3d8bbwe)
+rem and is "cleaner" but Microsoft.Xbox.dll appears to gate XBL locally
+rem when the package claims to be Microsoft, so sign-in fails before any
+rem network traffic. patch-rename.ps1 renames Name to Microsoft.Taptiles
+rem .Patched + Publisher to CN=xct-taptiles-patcher (PFN ends 252h5yj5c87g0),
+rem which makes the XBL chain actually attempt user.auth / title.auth /
+rem xsts.auth -- where the modern-XBL3 forgery in xbl_bridge.py short-
+rem circuits each call with our pre-minted XSTS.
+CheckNetIsolation LoopbackExempt -a -n="Microsoft.Taptiles_8wekyb3d8bbwe"                     >nul 2>&1
+CheckNetIsolation LoopbackExempt -a -n="Microsoft.Taptiles.Patched_252h5yj5c87g0"             >nul 2>&1
+rem Microsoft Studios Wordament -- Win8-era ad-supported word-puzzle title.
+rem Stock package crashes on launch (TWinUI 5961 / view-activation phase 4)
+rem because XAML construction touches the retired comScore + Microsoft.
+rem Advertising activatable types. xct-wordament-patcher strips those
+rem activatable-class registrations from AppxManifest.xml and re-signs;
+rem PFN is preserved so XBL recognises the TitleId.
+CheckNetIsolation LoopbackExempt -a -n="Microsoft.Studios.Wordament_8wekyb3d8bbwe"             >nul 2>&1
+rem Microsoft Rocket Riot 3D -- Win8-era DX11 game whose stock package
+rem fails activation with HRESULT 0x803F8001 (LICENSE_E_NOT_AVAILABLE);
+rem MS revoked the Store license same way they did Taptiles. xct-rocketriot
+rem -patcher renames the package to .Patched / CN=xct-rocketriot-patcher
+rem to sidestep the license check, then re-signs. Bridge handles the
+rem unknown-TitleId via its modern-XBL3 forgery path.
+CheckNetIsolation LoopbackExempt -a -n="Microsoft.RocketRiot.Patched_54fpwjmqm1ce6"            >nul 2>&1
+rem TY the Tasmanian Tiger -- Win8-era port, stock package still activates
+rem (license intact, no patcher needed). Just needs XBL sign-in bridged.
+CheckNetIsolation LoopbackExempt -a -n="Microsoft.TYtheTasmanianTiger_8wekyb3d8bbwe"           >nul 2>&1
+rem Assassin's Creed Pirates -- Ubisoft Win8 port, license intact on users
+rem who bought it pre-delist. Stock package activates; XBL sign-in only
+rem reaches the bridge once the UWP AppContainer loopback block is lifted.
+CheckNetIsolation LoopbackExempt -a -n="Ubisoft.AssassinsCreedPirates_ngz4m417e0mpw"           >nul 2>&1
+rem Hitman GO -- Square Enix Win8.1 port (Unity + Microsoft.Xbox.dll).
+rem Stock package activates; the modern XBL3 chain it runs through
+rem otherwise gates on packagespc.xboxlive.com/GetBasePackage which the
+rem bridge's generic XSTS doesn't pass -- handled by the packagespc 403
+rem shim in xbl_bridge.py.
+CheckNetIsolation LoopbackExempt -a -n="39C668CD.HitmanGO_r7bfsmp40f67j"                       >nul 2>&1
+echo       Mahjong, Minesweeper, Solitaire Collection, Adera, Taptiles, Wordament, RocketRiot, TY, AC Pirates, Hitman GO exempted.
 
-rem --- start ticket_server hidden -------------------------------------------
-rem ticket_server normally prints one "listening on..." line and nothing else,
-rem so it's safe to run silently with output captured to a log file. Running
-rem it via `start /B` keeps it tied to this console -- if the user closes
-rem the window, ticket_server dies with it (stop.bat would otherwise orphan).
-echo [6/7] Starting ticket_server (hidden, log: %%TEMP%%\xct_ticket_server.log)...
+rem --- start ticket_server hidden, fall back to visible on cold consent -----
+rem Default to hidden for a clean single-window UX. Once WAM has cached
+rem the MSA consent for our client_id, /ticket completes via
+rem GetTokenSilentlyAsync in ~50ms with no UI, so hidden is fine. The
+rem probe below detects a cold cache (fresh machine, token expired,
+rem consent revoked) by short-timing the first /ticket call; on failure
+rem we kill the hidden instance and restart ticket_server VISIBLY so
+rem WAM's consent dialog has a real parent window to render against.
+rem A hidden console can't parent a visible dialog, which is what made
+rem first-run consent silently hang in earlier v1.2.x builds.
+echo [6/7] Starting ticket_server (hidden)...
 set "TICKET_SERVER_LOG=%TEMP%\xct_ticket_server.log"
 del "%TICKET_SERVER_LOG%" >nul 2>&1
 start "" /B "%TICKET_SERVER%" > "%TICKET_SERVER_LOG%" 2>&1
@@ -207,11 +288,80 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 
+rem Probe /ticket with a SHORT timeout. Warm cache -> returns in ~50ms,
+rem done. Cold cache -> WAM tries to show a consent dialog which the
+rem hidden console can't display, so the call hangs; we abort at 5s and
+rem fall back to a visible ticket_server for the interactive flow.
+echo       Probing WAM token cache...
+powershell -NoProfile -Command "try { $null = Invoke-WebRequest -Uri 'http://127.0.0.1:8099/ticket' -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop; exit 0 } catch { exit 1 }"
+if errorlevel 1 (
+    echo       WAM cache cold -- restarting ticket_server visibly so a
+    echo       Microsoft sign-in dialog can render. Approve it when it appears.
+    taskkill /F /IM ticket_server.exe >nul 2>&1
+    timeout /t 1 /nobreak >nul
+    start "xct-win8bridge: ticket_server" cmd /k "%TICKET_SERVER%"
+    timeout /t 2 /nobreak >nul
+    powershell -NoProfile -Command "try { $null = Invoke-WebRequest -Uri 'http://127.0.0.1:8099/ticket' -TimeoutSec 120 -UseBasicParsing -ErrorAction Stop; exit 0 } catch { Write-Host ('       ' + $_.Exception.Message); exit 1 }"
+    if errorlevel 1 (
+        echo [!] Could not mint an MBI ticket. See the visible ticket_server
+        echo     window for the underlying WAM error. Most common causes:
+        echo       - consent dialog was cancelled or timed out
+        echo       - the Windows-signed-in MSA is not permitted for Xbox Live
+        taskkill /F /IM ticket_server.exe >nul 2>&1
+        pause & exit /b 1
+    )
+    echo       [OK] Consent granted -- next launch will be silent and hidden.
+) else (
+    echo       [OK] WAM cache warm -- ticket minted silently.
+)
+
 rem --- enable proxies --------------------------------------------------------
 echo [7/7] Enabling system proxies (WinINET + WinHTTP)...
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer /t REG_SZ /d "127.0.0.1:8080" /f >nul
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer /t REG_SZ /d "127.0.0.1:!MITM_PORT!" /f >nul
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f >nul
-netsh winhttp set proxy proxy-server="127.0.0.1:8080" bypass-list="<-loopback>" >nul
+netsh winhttp set proxy proxy-server="127.0.0.1:!MITM_PORT!" bypass-list="<-loopback>" >nul
+
+rem --- close-cleanup watcher ------------------------------------------------
+rem cmd.exe doesn't run any downstream cleanup when its window dies. Only
+rem the Ctrl+C -> N exit path falls through to the `call stop.bat` at the
+rem bottom of this script; closing via the window X, taskkill, or Ctrl+C
+rem -> Y all leave proxies pointed at 127.0.0.1:!MITM_PORT! and helpers running,
+rem forcing the user to remember to launch stop.bat manually.
+rem
+rem Resolve our own PID via a unique window-title marker matched against
+rem `tasklist /v`. (Don't try to use PowerShell's $PID.ParentProcessId --
+rem PS is spawned under a `cmd /c` that for /f wraps around the command,
+rem so its ParentProcessId is that intermediate cmd, which dies the moment
+rem PS exits and would make Wait-Process fire stop.bat immediately.)
+set "LAUNCHER_MARKER=xct-launcher-%RANDOM%-%RANDOM%-%RANDOM%"
+title %LAUNCHER_MARKER%
+set "LAUNCHER_PID="
+for /f "tokens=2 delims=," %%p in ('tasklist /v /fo csv /nh ^| findstr /c:"%LAUNCHER_MARKER%"') do if not defined LAUNCHER_PID set "LAUNCHER_PID=%%~p"
+title xct-win8bridge launcher %LAUNCHER_VERSION%
+
+if defined LAUNCHER_PID (
+    rem Watcher script: blocks on Wait-Process for the launcher's PID,
+    rem then runs stop.bat. Idempotent against the inline `call stop.bat`
+    rem at the end of this script.
+    set "WATCHER_CMD=%TEMP%\xct_watcher.cmd"
+    > "!WATCHER_CMD!" echo @echo off
+    >> "!WATCHER_CMD!" echo powershell -NoProfile -Command "Wait-Process -Id !LAUNCHER_PID! -ErrorAction SilentlyContinue"
+    >> "!WATCHER_CMD!" echo call "%~dp0stop.bat"
+
+    rem VBS shim to run the watcher detached + truly hidden. Start-Process
+    rem -WindowStyle Hidden is unreliable when invoked from an elevated
+    rem cmd (intermittently flashes a window or fails to detach); the
+    rem long-standing WScript.Shell.Run pattern with mode 0 is the
+    rem bulletproof way to fire-and-forget a console process invisibly.
+    rem `)` must be escaped as `^)` because we're inside an `if (...)`
+    rem block and unescaped close-parens prematurely terminate the block,
+    rem so without the caret the VBS gets written without its closing
+    rem paren and cscript fails with "Expected ')'" at compile time.
+    set "WATCHER_VBS=%TEMP%\xct_watcher.vbs"
+    > "!WATCHER_VBS!" echo Set WshShell = CreateObject("WScript.Shell"^)
+    >> "!WATCHER_VBS!" echo WshShell.Run "cmd /c """"!WATCHER_CMD!""""", 0, False
+    cscript //nologo "!WATCHER_VBS!" >nul
+)
 
 color 0A
 echo.
@@ -225,25 +375,45 @@ echo     Microsoft Mahjong              Microsoft.MicrosoftMahjong_8wekyb3d8bbwe
 echo     Microsoft Minesweeper          Microsoft.MicrosoftMinesweeper_8wekyb3d8bbwe
 echo     Microsoft Solitaire Collection Microsoft.MicrosoftSolitaireCollection_8wekyb3d8bbwe
 echo     Microsoft Adera                Microsoft.Adera_8wekyb3d8bbwe
+echo     Microsoft Taptiles             Microsoft.Taptiles_8wekyb3d8bbwe
 echo.
 echo   Live intercepts scroll below. Expect lines like:
 echo     [xbl_bridge] bridged GET profile.xboxlive.com/users/me/id
 echo.
-echo   TO STOP:  press Ctrl+C, then type N at the "Terminate
-echo             batch job (Y/N)?" prompt. Answering N lets
-echo             stop.bat run and reverses the proxies.
-echo             (Y skips cleanup -- proxies stay on; run
-echo             stop.bat manually if that happens.)
+echo   Full session log (verbose, includes per-flow detail):
+echo     %TEMP%\xct_mitmdump.log
+echo.
+echo   TO STOP:  close this window OR press Ctrl+C. A hidden
+echo             watcher process runs stop.bat automatically
+echo             when the launcher exits, regardless of how --
+echo             proxies + helpers are reverted either way.
 echo.
 echo ============================================================
 echo.
 
-rem `~d xboxlive.com` is a mitmproxy view filter -- it only suppresses the
-rem per-flow stdout lines for non-xboxlive hosts. The addon still sees every
-rem flow (and short-circuits non-xboxlive ones itself), and `[xbl_bridge]`
-rem ctx.log lines are unaffected. This just hides the user's general browsing
-rem traffic from the launcher window.
-mitmdump --listen-host 127.0.0.1 --listen-port 8080 -s addon\xbl_bridge.py --flow-detail 1 "~d xboxlive.com"
+rem View filter: show xboxlive flows EXCEPT titlestorage. The addon's
+rem titlestorage shim produces its own dedup-collapsed "[xbl_bridge]
+rem titlestorage shim: ..." line per distinct shim event, which is the
+rem useful signal. Leaving titlestorage in the view filter too would flood
+rem the launcher window with per-flow request/response lines (games like
+rem Mahjong poll titlestorage dozens of times per second). Non-xboxlive
+rem traffic is already short-circuited by the addon and hidden here.
+rem `[xbl_bridge]` ctx.log lines are logger-level, not view-filtered, so
+rem they still appear regardless.
+rem
+rem connection_strategy=lazy + upstream_cert=false:
+rem   Dead hosts like data.xboxlive.com still resolve in DNS but no longer
+rem   accept TCP. In mitmproxy's default (eager) mode the proxy dials the
+rem   upstream during CONNECT to grab its real cert, fails with "TCP
+rem   refused"/timeout, and replies 502 Bad Gateway -- the client never
+rem   gets to make the inner HTTP request, so the DEAD_HOSTS_SHIM_200 in
+rem   xbl_bridge.py's request() hook never fires. Lazy mode defers the
+rem   upstream connect until/unless it is actually needed, and
+rem   upstream_cert=false tells mitmproxy to generate the MITM leaf cert
+rem   from the client's SNI rather than the real server's cert. Together
+rem   they let the addon synthesise a 200 response locally for dead hosts
+rem   without ever touching upstream.
+mitmdump --listen-host 127.0.0.1 --listen-port !MITM_PORT! -s addon\xbl_bridge.py --flow-detail 1 --set connection_strategy=lazy --set upstream_cert=false "~d xboxlive.com & ! ~d titlestorage.xboxlive.com"
 
 rem Reached after mitmdump exits normally or the user presses Ctrl+C then N.
 echo.
