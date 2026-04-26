@@ -417,7 +417,22 @@ rem   upstream_cert=false tells mitmproxy to generate the MITM leaf cert
 rem   from the client's SNI rather than the real server's cert. Together
 rem   they let the addon synthesise a 200 response locally for dead hosts
 rem   without ever touching upstream.
-mitmdump --listen-host 127.0.0.1 --listen-port !MITM_PORT! -s addon\xbl_bridge.py --flow-detail 1 --set connection_strategy=lazy --set upstream_cert=false "~d xboxlive.com & ! ~d titlestorage.xboxlive.com"
+rem
+rem ignore_hosts:
+rem   Pass through (no TLS interception) for hosts that have nothing to do
+rem   with the games -- Delivery Optimization, Windows Update telemetry,
+rem   diagnostic data, Edge/SmartScreen, Defender. These were generating
+rem   "Server TLS handshake failed. Certificate verify failed: unable to
+rem   get local issuer certificate" warnings every few seconds because
+rem   Microsoft signs them with internal-issuing CAs not in mitmproxy's
+rem   bundled `certifi` CA list. Passthrough means the proxy doesn't try
+rem   to terminate TLS for them at all -- the connection is relayed
+rem   straight to the upstream, no cert check happens, no log noise. The
+rem   game-relevant Microsoft hosts (`*.xboxlive.com`, `*.mp.microsoft.com`)
+rem   are NOT in this list -- their CA chains validate fine against
+rem   certifi.
+set "MITM_IGNORE=--ignore-hosts \.dsp\.mp\.microsoft\.com$ --ignore-hosts \.update\.microsoft\.com$ --ignore-hosts \.events\.data\.microsoft\.com$ --ignore-hosts \.config\.edge\.skype\.com$ --ignore-hosts \.smartscreen\.microsoft\.com$ --ignore-hosts \.delivery\.mp\.microsoft\.com$"
+mitmdump --listen-host 127.0.0.1 --listen-port !MITM_PORT! -s addon\xbl_bridge.py --flow-detail 1 --set connection_strategy=lazy --set upstream_cert=false %MITM_IGNORE% "~d xboxlive.com & ! ~d titlestorage.xboxlive.com"
 
 rem Reached after mitmdump exits normally or the user presses Ctrl+C then N.
 echo.
