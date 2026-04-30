@@ -134,11 +134,49 @@ if not "%MITM_PORT%"=="8080" (
 )
 
 rem --- dependency checks -----------------------------------------------------
-where python >nul 2>&1
-if errorlevel 1 (
-    echo [!] Python not found on PATH.
-    echo     Install Python 3 from https://python.org and re-run.
-    pause & exit /b 1
+rem `where python` is unreliable on stock Win10/11: a zero-byte WindowsApps
+rem App Execution Alias `python.exe` exists by default and satisfies `where`,
+rem but actually invoking it just prints "Python was not found; run without
+rem arguments to install from the Microsoft Store" and exits non-zero. So we
+rem detect Python by *running* it -- if it can't print sys.version_info[0],
+rem it's not really there and we silently install from python.org.
+set "PY_VER=3.12.7"
+set "PY_DIR=%ProgramFiles%\Python312"
+set "PYTHON_OK="
+for /f "delims=" %%v in ('python -c "import sys; print(sys.version_info[0])" 2^>nul') do if "%%v"=="3" set "PYTHON_OK=1"
+if not defined PYTHON_OK (
+    echo [*] Python 3 not detected -- downloading and installing silently...
+    set "PY_INSTALLER=%TEMP%\python-!PY_VER!-amd64.exe"
+    curl -L -f -s -o "!PY_INSTALLER!" "https://www.python.org/ftp/python/!PY_VER!/python-!PY_VER!-amd64.exe"
+    if errorlevel 1 (
+        echo [!] Failed to download Python installer from python.org.
+        echo     Check internet connection, or install Python 3 manually
+        echo     from https://python.org and re-run launch.bat.
+        pause & exit /b 1
+    )
+    rem InstallAllUsers=1 + PrependPath=1 -> system-wide install at
+    rem %ProgramFiles%\Python312 and registers in Machine PATH (admin
+    rem only, which we already are via self-elevate). The current cmd
+    rem session's PATH won't see the registry update, so we manually
+    rem prepend the install dir below.
+    echo       Running Python !PY_VER! installer (quiet, ~30s)...
+    "!PY_INSTALLER!" /quiet InstallAllUsers=1 PrependPath=1 Include_test=0 Include_launcher=1
+    if errorlevel 1 (
+        echo [!] Python installer reported an error.
+        echo     Try installing manually from https://python.org and re-run.
+        pause & exit /b 1
+    )
+    if exist "!PY_DIR!\python.exe" (
+        set "PATH=!PY_DIR!;!PY_DIR!\Scripts;!PATH!"
+    )
+    set "PYTHON_OK="
+    for /f "delims=" %%v in ('python -c "import sys; print(sys.version_info[0])" 2^>nul') do if "%%v"=="3" set "PYTHON_OK=1"
+    if not defined PYTHON_OK (
+        echo [!] Python !PY_VER! installed but not visible in this shell.
+        echo     Close this window and re-run launch.bat from a fresh shell.
+        pause & exit /b 1
+    )
+    echo       [OK] Python !PY_VER! installed.
 )
 
 echo [1/7] Installing Python packages (mitmproxy, ecdsa)...
