@@ -8,7 +8,7 @@ cd /d "%~dp0"
 rem === Launcher version -- BUMP this before tagging a release on GitHub.
 rem     launch.bat auto-updates by comparing this against the latest release
 rem     tag; a forgotten bump means users ship-loop re-downloading.
-set "LAUNCHER_VERSION=v1.5"
+set "LAUNCHER_VERSION=v1.6"
 
 rem --- self-elevate ----------------------------------------------------------
 net session >nul 2>&1
