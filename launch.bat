@@ -8,7 +8,7 @@ cd /d "%~dp0"
 rem === Launcher version -- BUMP this before tagging a release on GitHub.
 rem     launch.bat auto-updates by comparing this against the latest release
 rem     tag; a forgotten bump means users ship-loop re-downloading.
-set "LAUNCHER_VERSION=v1.4"
+set "LAUNCHER_VERSION=v1.5"
 
 rem --- self-elevate ----------------------------------------------------------
 net session >nul 2>&1
@@ -380,6 +380,9 @@ echo     Microsoft Minesweeper          Microsoft.MicrosoftMinesweeper_8wekyb3d8
 echo     Microsoft Solitaire Collection Microsoft.MicrosoftSolitaireCollection_8wekyb3d8bbwe
 echo     Microsoft Adera                Microsoft.Adera_8wekyb3d8bbwe
 echo     Microsoft Taptiles             Microsoft.Taptiles_8wekyb3d8bbwe
+echo     Hitman GO                      39C668CD.HitmanGO_r7bfsmp40f67j
+echo     Assassin's Creed Pirates       Ubisoft.AssassinsCreedPirates_ngz4m417e0mpw
+echo     Hydro Thunder Hurricane        Microsoft.Studios.HydroThunderHurricane_8wekyb3d8bbwe
 echo.
 echo   Live intercepts scroll below. Expect lines like:
 echo     [xbl_bridge] bridged GET profile.xboxlive.com/users/me/id

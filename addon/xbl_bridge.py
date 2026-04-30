@@ -1125,6 +1125,24 @@ class XblBridge:
             )
             return
 
+        # progress.xboxlive.com/.../progress/titleachievements returns the
+        # full per-title achievement catalog with `unlocked:false` on every
+        # row, even when the user has earned achievements on the modern
+        # service (the Win8-era unlock state never propagated forward when
+        # MS migrated to achievements.xboxlive.com). Without a merge, in-
+        # game Achievements panels for titles that read this endpoint
+        # (Assassin's Creed Pirates, ...) display every entry as locked.
+        # Fetch the v1 unlocked list and stamp `unlocked` / `unlockedOnline`
+        # / `timeUnlocked` onto matching catalog rows.
+        if (
+            host == "progress.xboxlive.com"
+            and flow.response
+            and flow.response.status_code == 200
+            and flow.request.method == "GET"
+            and "/progress/titleachievements" in (flow.request.path or "")
+        ):
+            self._maybe_merge_progress_titleachievements(flow)
+
         # Log every game-side modern XBL auth-endpoint response with a body
         # snippet. Modern XBL3 titles (e.g. Taptiles) bypass the legacy
         # IWSTrust13 forgery path entirely and mint their own UserToken /
@@ -1246,6 +1264,10 @@ class XblBridge:
             ("GET",  r"^/xbox/users/(?P<xuid>\d+)/profile$",                          self._h_xbox_user_profile),
             ("GET",  r"^/xbox/users/(?P<xuid>\d+)/title/(?P<tid>\d+)/achievements$", self._h_xbox_user_title_achievements),
             ("POST", r"^/xbox/users/(?P<xuid>\d+)/title/(?P<tid>\d+)/achievements/(?P<aid>\d+)/unlock$", self._h_xbox_achievement_unlock),
+            # Diagnostic sink. The shim's xct::state::Trace() POSTs every
+            # event here so it shows up in mitmdump even when the
+            # package dir is read-only for UWP app-container writes.
+            ("POST", r"^/xbox/diag$",                                                  self._h_xbox_diag),
             # legacy compat for the existing Cocos2d helper
             ("GET",  r"^/achievements/(?P<tid>\d+)$",                                  self._h_legacy_earned_names),
         ]
@@ -1275,6 +1297,14 @@ class XblBridge:
         )
 
     # --- bridge-intercept handlers ---------------------------------------
+
+    def _h_xbox_diag(self, flow: http.HTTPFlow) -> None:
+        """POST /xbox/diag — log a shim-side diagnostic event."""
+        body = (flow.request.get_content() or b"").decode("utf-8", errors="replace")
+        ctx.log.info(f"[xbl_bridge] SHIM-DIAG {body}")
+        flow.response = http.Response.make(
+            204, b"", {"Content-Type": "text/plain"},
+        )
 
     def _h_xbox_user_current(self, flow: http.HTTPFlow) -> None:
         """GET /xbox/user — current signed-in user identity."""
@@ -1382,6 +1412,103 @@ class XblBridge:
             {"Content-Type": "application/json"},
         )
         ctx.log.info(f"[xbl_bridge] bridge-intercept: /xbox/users/{xuid}/profile -> {out['gamertag']}")
+
+    def _maybe_merge_progress_titleachievements(self, flow: http.HTTPFlow) -> None:
+        """Stamp v1 unlock state onto a 200 progress.xboxlive.com
+        /progress/titleachievements response.
+
+        The legacy endpoint always reports `unlocked:false` for every row;
+        the user's actual unlocks live on achievements.xboxlive.com (v1).
+        For each catalog row whose `id` matches an unlocked v1 row, set
+        `unlocked` / `unlockedOnline` true and copy the unlock timestamp
+        + flags so the game's Achievements UI renders the user's progress.
+        """
+        m = re.match(
+            r"^/users/xuid\((\d+)\)/progress/titleachievements",
+            flow.request.path or "",
+        )
+        if not m:
+            return
+        xuid = m.group(1)
+        tid = flow.request.query.get("titleId") if flow.request.query else None
+        if not tid:
+            return
+
+        try:
+            body = json.loads((flow.response.content or b"").decode("utf-8"))
+        except Exception:
+            return
+        achievements = body.get("achievements")
+        if not isinstance(achievements, list) or not achievements:
+            return
+
+        try:
+            url = (
+                f"https://achievements.xboxlive.com/users/xuid({xuid})"
+                f"/achievements?titleId={tid}"
+            )
+            req = urllib.request.Request(url, headers={
+                "Authorization": self.xbl3_auth or "",
+                "x-xbl-contract-version": "1",
+                "Accept": "application/json",
+            })
+            with _NOPROXY_OPENER.open(req, timeout=10) as resp:
+                unlocked_data = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            ctx.log.warn(
+                f"[xbl_bridge] titleachievements merge: v1 fetch failed for "
+                f"tid {tid}: {exc}"
+            )
+            return
+
+        unlocked_by_id: dict[int, dict] = {}
+        for a in (unlocked_data.get("achievements") or []):
+            try:
+                aid = int(a.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if aid and bool(a.get("unlocked")):
+                unlocked_by_id[aid] = a
+        if not unlocked_by_id:
+            ctx.log.info(
+                f"[xbl_bridge] titleachievements merge: tid {tid} has no v1 "
+                f"unlocks for xuid {xuid}, leaving response untouched"
+            )
+            return
+
+        merged = 0
+        for a in achievements:
+            try:
+                aid = int(a.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            u = unlocked_by_id.get(aid)
+            if not u:
+                continue
+            a["unlocked"] = True
+            a["unlockedOnline"] = True
+            if u.get("timeUnlocked"):
+                a["timeUnlocked"] = u["timeUnlocked"]
+            if u.get("flags") is not None:
+                a["flags"] = u["flags"]
+            if u.get("platform") is not None:
+                a["platform"] = u["platform"]
+            merged += 1
+
+        if merged == 0:
+            return
+
+        flow.response.set_content(json.dumps(body).encode("utf-8"))
+        # Recompute Content-Length so downstream parsers don't read stale.
+        if "Content-Length" in flow.response.headers:
+            flow.response.headers["Content-Length"] = str(
+                len(flow.response.content or b"")
+            )
+        ctx.log.info(
+            f"[xbl_bridge] titleachievements merge: tid {tid} -> "
+            f"{merged}/{len(achievements)} marked unlocked "
+            f"(v1 returned {len(unlocked_by_id)} unlocked)"
+        )
 
     def _h_xbox_user_title_achievements(
         self, flow: http.HTTPFlow, xuid: str, tid: str

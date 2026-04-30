@@ -17,6 +17,16 @@ Follow progress on X: [**@XCTdotLIVE**](https://x.com/XCTdotLIVE). We're continu
 
 ## Changelog
 
+### v1.5 — 2026-04-30
+
+- **New title working end-to-end:** Assassin's Creed Pirates (Ubisoft Win8 port). Stock package activates on accounts that bought it pre-delist; the bridge handles sign-in via the always-rewrite `XBL2.0` → `XBL3.0` policy. Achievements list populates with the player's actual unlock state — see screenshot below.
+- **`progress.xboxlive.com/.../progress/titleachievements` v1-unlock merge.** The legacy `/progress/titleachievements` endpoint always returns the full per-title achievement catalog with `unlocked:false` on every row, even when the user has earned achievements on the modern `achievements.xboxlive.com` (v1) service. AC Pirates queries this legacy endpoint and renders straight from its response, so the in-game Achievements panel was showing every entry as locked despite the user holding genuine unlocks. The bridge now intercepts a `200` from `/progress/titleachievements`, fetches the matching v1 unlock list with the modern `XBL3.0` token, and stamps `unlocked` / `unlockedOnline` / `timeUnlocked` / `flags` / `platform` onto matching catalog rows by `id`. Logged as `[xbl_bridge] titleachievements merge: tid <id> -> <n>/<total> marked unlocked (v1 returned <k> unlocked)`. Other titles that read this endpoint inherit the same fix automatically.
+- **Assassin's Creed Pirates loopback exemption** added to step 5 of `launch.bat` (`CheckNetIsolation LoopbackExempt -a -n=Ubisoft.AssassinsCreedPirates_ngz4m417e0mpw`). Without it the UWP AppContainer blocks `127.0.0.1` and the title never reaches the bridge.
+- **READY banner updated.** The supported-titles list in `launch.bat`'s "READY" splash now includes Hitman GO, Assassin's Creed Pirates, and Hydro Thunder Hurricane (in addition to the original Microsoft.* set), so the reader doesn't have to scroll back through the loopback-exemption step to see the full list.
+- **Per-title sets via `%PROGRAMDATA%\xct\bridge_titles.json`** (commit `c9db602`). The `_SHIM_TITLEGROUPS`, `entitlement_forge_content_ids`, `acquire_receipt_forge_product_ids` and `upsell_bypass_product_ids` sets are now loaded at addon startup from `C:\ProgramData\xct\bridge_titles.json` if present, falling back to the in-source defaults otherwise. Lets a maintainer add a new title's titlegroup GUID without re-rolling the bridge — useful while iterating against new titles.
+- **TLS warning silence for non-game Microsoft hosts** (commit `e81ee62`). Added `--ignore-hosts` patterns for Delivery Optimization, Windows Update, telemetry, Edge SmartScreen and Defender so the launcher window no longer scrolls "Server TLS handshake failed. Certificate verify failed" warnings every few seconds while general OS traffic flows past — these hosts use internal-issuing CAs not in `certifi`'s bundle, and have nothing to do with Xbox Live anyway.
+- **Shim-side diag sink (`POST /xbox/diag`).** Added a bridge endpoint that the (separate) `xct-win8pass` Microsoft.Xbox.dll shim posts trace events to. UWP app-container titles can't write a side-by-side trace file because the package install dir is read-only from inside the container; routing diagnostic events through the bridge lets them land in `mitmdump`'s log instead. Logged as `[xbl_bridge] SHIM-DIAG <message>`.
+
 ### v1.4 — 2026-04-25
 
 - **New title working end-to-end:** Hydro Thunder Hurricane (Microsoft Studios / Vector Unit Win8 port, TitleId `1297290211`). After unlocking the loopback gate, the title's full Win8 SDK 2.0 sign-in chain (`auth.xboxlive.com/XSts` legacy SOAP → `profile.xboxlive.com` profile fetch → `titlestorage.xboxlive.com` cloud save load) goes through the bridge cleanly. Earned achievements unlock and render in the in-game Achievements page.
@@ -87,7 +97,7 @@ Quality-of-life pass on `launch.bat`. No new titles, no protocol changes — eve
 ## Status
 
 > **Aim: every legacy Windows 8-era first-party Xbox Live title.**
-> **Currently: 6 of 6 tried, working.**
+> **Currently: 7 of 7 tried, working.**
 
 | Title | TitleId | Sign-in | Gamerpic | Achievements |
 |---|---|:---:|:---:|:---:|
@@ -97,6 +107,7 @@ Quality-of-life pass on `launch.bat`. No new titles, no protocol changes — eve
 | Microsoft Adera (2.5.2.34894) | 1297290206 | ✓ | ✓ | ✓ |
 | Hitman GO (1.0.52.0, Square Enix) | 1397824345 | ✓ | n/a | ✓ |
 | Hydro Thunder Hurricane (1.2.5.0, Microsoft Studios / Vector Unit) | 1297290211 | ✓ | n/a | ✓ |
+| Assassin's Creed Pirates (Ubisoft) | (see bridge log `[xbl_bridge] titleachievements merge: tid …`) | ✓ | n/a | ✓ |
 
 Microsoft Mahjong with gamertag, gamerpic and its legacy XBL2-era achievement set all populating through the bridge:
 
@@ -121,6 +132,10 @@ Hitman GO — first non-Microsoft-published Win8.1 title to come up on the bridg
 Hydro Thunder Hurricane — Microsoft Studios / Vector Unit Win8 port. Unusually for the portfolio, this title doesn't query an achievements service at all: unlock state is encoded in the user's `titlestorage` cloud save (a `SCUV`-magic binary in the title's titlegroup). The bridge gets the legacy `auth.xboxlive.com/XSts` SOAP → `profile.xboxlive.com` → cloud-save load chain through cleanly, and unlocks register as the player earns them. Splish Splash + Spare Change shown unlocked after a single race:
 
 ![Hydro Thunder Hurricane — Achievements page with Splish Splash and Spare Change unlocked, remaining tiles locked, 3,375 CR shown](docs/hydro-thunder-achievements.png)
+
+Assassin's Creed Pirates — first Ubisoft title on the bridge. The legacy `progress.xboxlive.com/.../progress/titleachievements` catalog is fetched as normal, then v1.5's v1-unlock merge stamps the player's actual unlock state from `achievements.xboxlive.com` onto matching catalog rows by `id`, so the in-game Achievements panel renders the user's real progress instead of an all-locked list:
+
+![Assassin's Creed Pirates — Achievements page with Sailing in style, Master of the Seas, Join me!, Terror of the Seas tiles rendered, 10G each](docs/ac-pirates-achievements.png)
 
 Daily Challenge loaders in Mahjong are blocked by a separate, unrelated problem — the Arkadium backend that hosts the challenge content is itself decommissioned. That's out of scope here and lives under a different umbrella.
 
