@@ -1,5 +1,13 @@
 # Changelog
 
+### v1.8 — 2026-05-03
+
+- **Publish chosen mitmproxy port to `%ProgramData%\xct\bridge_port`** so the xct-win8pass shim DLL (running inside each patched UWP title's AppContainer) can discover what port the launcher actually bound to. The shim previously hardcoded `127.0.0.1:8080`, so any time launch.bat fell back to 8081/8082/... (because SABnzbd, Tomcat, a dev server, etc. was on 8080) every shim-dependent title — Keflings, Adera, AC Pirates, iStunt 2, etc. — silently failed sign-in. Non-shim titles (Mahjong, Solitaire, Minesweeper) were unaffected because they use WinINET → system proxy → whatever port the launcher chose. Diagnosed when Keflings stopped signing in after SABnzbd grabbed 8080. The published file's parent dir gets `icacls /grant "*S-1-15-2-1:(OI)(CI)R"` (ALL APPLICATION PACKAGES, read) so AppContainers can read it without a Capability claim. `stop.bat` deletes the port file so a stale value never misleads the next session.
+
+  Tester action required: re-run `patch.ps1` (or launcher.bat) for any title patched with a pre-v1.8 win8pass shim — the new shim DLL is in `bin/Microsoft.Xbox.dll`.
+
+- **`tiles.xbox.com` dead-host shim** returns a 1×1 transparent PNG instead of letting the connection time out. Win8-era titles like Reckless Racing Ultimate hardcode achievement-tile URLs at `tiles.xbox.com`, which Microsoft replaced server-side with `image.xboxlive.com`; the original host now hangs at the TCP layer and the in-game Achievements panel blocks on a multi-second timeout per missing tile, never finishing its load. The synthetic PNG lets the game's image decoder succeed and the panel render (with blank icons in place of the missing artwork). Generalised the existing `DEAD_HOSTS_SHIM_200` from a host set to a `host -> (status, body, content_type)` dict so different dead hosts can return different bodies; moved the dispatch above the `.xboxlive.com` early-return because tiles.xbox.com isn't an xboxlive.com host.
+
 ### v1.5 — 2026-04-30
 
 - **New title working end-to-end:** Assassin's Creed Pirates (Ubisoft Win8 port). Stock package activates on accounts that bought it pre-delist; the bridge handles sign-in via the always-rewrite `XBL2.0` → `XBL3.0` policy. Achievements list populates with the player's actual unlock state — see screenshot below.

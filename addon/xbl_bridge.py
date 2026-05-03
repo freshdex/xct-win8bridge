@@ -143,15 +143,30 @@ XBL20_ONLY_HOSTS = {
 
 # Hosts that are *dead* server-side — DNS still resolves but the IP no
 # longer accepts connections. The legacy-SDK games block their sign-in
-# state machine until they get a response from these endpoints, so we
-# synthesize a 200-empty reply locally to keep the flow moving.
+# (or in tiles.xbox.com's case, achievement-panel) state machine until
+# they get a response, so we synthesize one locally to keep the flow
+# moving. Each entry is (status_code, body_bytes, content_type).
 #
 #   data.xboxlive.com — legacy XBL presence/beacon endpoint that Microsoft
-#                       Adera (and likely others) posts to during sign-in.
+#                       Adera (and likely others) POSTs to during sign-in.
 #                       Decommissioned circa Xbox 360 retirement; now
 #                       times out at the TCP layer.
+#   tiles.xbox.com    — legacy achievement-tile image host; replaced
+#                       server-side by image.xboxlive.com but Win8-era
+#                       titles like Reckless Racing Ultimate still hard-
+#                       code URLs to it. The game's Achievements panel
+#                       blocks on a multi-second TCP timeout per missing
+#                       tile and never finishes loading. Returning a 1x1
+#                       transparent PNG lets the game's image decoder
+#                       succeed and the panel render with blank icons.
+_PNG_1X1_TRANSPARENT = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cb\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 DEAD_HOSTS_SHIM_200 = {
-    "data.xboxlive.com",
+    "data.xboxlive.com": (200, b"",                   "application/json"),
+    "tiles.xbox.com":    (200, _PNG_1X1_TRANSPARENT,  "image/png"),
 }
 
 # Magic hostname the bridge intercepts in-flow (never forwarded upstream)
@@ -852,20 +867,25 @@ class XblBridge:
             )
             return
 
-        if not host.endswith(".xboxlive.com"):
-            return
-
-        # Dead hosts: short-circuit with a synthetic 200 empty body so the
-        # game's state machine unblocks. Setting flow.response here prevents
-        # mitmproxy from ever trying to reach the (unreachable) upstream.
-        if host in DEAD_HOSTS_SHIM_200:
+        # Dead hosts: short-circuit with a synthetic response so the game's
+        # state machine unblocks instead of hanging on a 10s+ TCP timeout.
+        # Setting flow.response here prevents mitmproxy from ever trying to
+        # reach the (unreachable) upstream. Lives BEFORE the .xboxlive.com
+        # early-return because some dead hosts (tiles.xbox.com) aren't on
+        # the xboxlive.com domain.
+        shim = DEAD_HOSTS_SHIM_200.get(host)
+        if shim is not None:
+            status, body, content_type = shim
             flow.response = http.Response.make(
-                200, b"", {"Content-Type": "application/json"}
+                status, body, {"Content-Type": content_type}
             )
             ctx.log.info(
                 f"[xbl_bridge] dead-host shim: {flow.request.method} "
-                f"{host}{flow.request.path[:100]} -> 200(empty)"
+                f"{host}{flow.request.path[:100]} -> {status}({len(body)}B)"
             )
+            return
+
+        if not host.endswith(".xboxlive.com"):
             return
 
         # Modern XBL3 auth chain forgery. Short-circuit user.auth /

@@ -26,6 +26,11 @@ taskkill /F /IM mitmdump.exe      >nul 2>&1
 taskkill /F /IM mitmweb.exe       >nul 2>&1
 taskkill /F /IM ticket_server.exe >nul 2>&1
 
+rem Clear the published bridge port so a fresh launch.bat picks a
+rem genuinely-free port (and the win8pass shim sees no stale value if
+rem it loads while the bridge is down). The ACL'd parent dir stays.
+del "%ProgramData%\xct\bridge_port" >nul 2>&1
+
 echo.
 echo   Stopped. Proxies disabled, helpers terminated.
 echo   Loopback exemptions + mitmproxy CA remain installed

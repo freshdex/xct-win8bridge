@@ -8,7 +8,7 @@ cd /d "%~dp0"
 rem === Launcher version -- BUMP this before tagging a release on GitHub.
 rem     launch.bat auto-updates by comparing this against the latest release
 rem     tag; a forgotten bump means users ship-loop re-downloading.
-set "LAUNCHER_VERSION=v1.7"
+set "LAUNCHER_VERSION=v1.8"
 
 rem --- self-elevate ----------------------------------------------------------
 net session >nul 2>&1
@@ -132,6 +132,21 @@ if not defined MITM_PORT (
 if not "%MITM_PORT%"=="8080" (
     echo [*] Port 8080 in use -- automatically using %MITM_PORT% instead.
 )
+
+rem Publish the chosen port to %ProgramData%\xct\bridge_port so the
+rem xct-win8pass shim DLL (running inside each patched UWP title's
+rem AppContainer) can discover it. Pre-v1.8, the shim hardcoded :8080
+rem and silently broke whenever the launcher fell back to a different
+rem port (SABnzbd / Tomcat etc. on 8080). The directory ACL grants
+rem ALL APPLICATION PACKAGES (S-1-15-2-1) read so AppContainer reads
+rem don't need a Capability claim. Idempotent: subsequent runs just
+rem overwrite the file; ACL grant is a no-op once present.
+set "XCT_PORT_DIR=%ProgramData%\xct"
+set "XCT_PORT_FILE=%XCT_PORT_DIR%\bridge_port"
+if not exist "%XCT_PORT_DIR%" mkdir "%XCT_PORT_DIR%" >nul 2>&1
+icacls "%XCT_PORT_DIR%" /grant "*S-1-15-2-1:(OI)(CI)R" >nul 2>&1
+> "%XCT_PORT_FILE%" echo %MITM_PORT%
+icacls "%XCT_PORT_FILE%" /grant "*S-1-15-2-1:R" >nul 2>&1
 
 rem --- dependency checks -----------------------------------------------------
 rem `where python` is unreliable on stock Win10/11: a zero-byte WindowsApps
