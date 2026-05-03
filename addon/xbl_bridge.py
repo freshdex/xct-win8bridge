@@ -1551,6 +1551,19 @@ class XblBridge:
         except ValueError:
             max_items = 100
 
+        # xuid=0 is the shim's "I don't have an identity yet" sentinel --
+        # happens when a title queries achievements before the shim's
+        # background sign-in fetch has populated cached identity. The
+        # bridge has the real bootstrap xuid in `self.xuid`, so substitute
+        # it here. Without this the title's "Fetching data..." spinner
+        # hangs after a 403 from xboxlive.com (no such user with xuid=0).
+        if xuid == "0" and self.xuid:
+            ctx.log.info(
+                f"[xbl_bridge] /xbox/users/0/title/{tid}/achievements: "
+                f"substituting bootstrap xuid={self.xuid}"
+            )
+            xuid = str(self.xuid)
+
         url = (
             f"https://achievements.xboxlive.com/users/xuid({xuid})"
             f"/achievements?titleId={tid}&maxItems={max_items}"
