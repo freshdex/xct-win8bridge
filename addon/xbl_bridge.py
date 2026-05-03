@@ -193,6 +193,7 @@ BRIDGE_INTERCEPT_HOST = "xct-bridge.invalid"
 # the game's Cocos2d.dll achievement loader to hit the magic URL.
 ACHIEVEMENT_PROXY_TITLEIDS = {
     961415122,  # Gravity Guy (Miniclip SA, sideload via xct-gravityguy-patcher)
+    961415123,  # iStunt 2 (Miniclip SA, sideload via xct-win8pass)
 }
 
 # Microsoft Store Content IDs known to be revoked from MS's catalog.
